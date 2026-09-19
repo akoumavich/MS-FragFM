@@ -115,11 +115,14 @@ def main():
         for path in p.get("paths", [p.get("path")]):
             src = path.read_text(encoding="utf-8")
             label = f"{p['name']}:{path.name}" if "paths" in p else p["name"]
-            if p["new"] in src:
-                print(f"  already  {label}")
-                n_already += 1
-                continue
+            # Test the anchor first.  When `new` is a prefix of `old` -- as when a
+            # patch only deletes a trailing item from an import list -- checking
+            # `new in src` first reports every unpatched file as already done.
             if p["old"] not in src:
+                if p["new"] in src:
+                    print(f"  already  {label}")
+                    n_already += 1
+                    continue
                 print(f"  STALE    {label}: anchor not found in {path}")
                 sys.exit(2)
             if args.check:
