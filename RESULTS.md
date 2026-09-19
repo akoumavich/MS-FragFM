@@ -149,3 +149,59 @@ Even in-sample, a 1,000-fragment fixed vocabulary fully covers only 55% of
 molecules. That is already an argument that a fixed vocabulary is the wrong
 design and FragFM's stochastic fragment bag is load-bearing rather than a
 refinement. The held-out number will be worse.
+
+---
+
+## R3 — E0-a held-out: the representational ceiling
+
+`scripts/fragment_coverage.py --mode holdout --n 5000` @ `b5f4af6` · BRICS,
+relaxed · vocabulary fitted on the MassSpecGym train fold, scored on the test fold
+
+| | |
+| --- | ---: |
+| train-fold vocabulary | 3,117 fragments |
+| test-fold vocabulary | 2,663 fragments |
+| **test molecules containing >=1 fragment absent from train** | **71.4%** |
+| mean share of a test molecule's fragments unseen in train | 16.7% |
+
+| top-V | in-sample | held-out |
+| ---: | ---: | ---: |
+| 100 | 0.144 | 0.027 |
+| 250 | 0.304 | 0.071 |
+| 500 | 0.445 | 0.131 |
+| 1,000 | 0.607 | 0.202 |
+| 2,000 | 0.795 | 0.246 |
+| 3,117 (full) | 1.000 | **0.286** |
+
+**The curve is flat by V=2,000 at 0.286.** Enlarging a vocabulary drawn from the
+same 5,000 training molecules does nothing after that point — the missing
+fragments are not rare training fragments, they are fragments that are simply
+absent from the training molecules.
+
+### What this means
+
+A generator that assembles molecules from a fragment vocabulary cannot emit a
+molecule containing a fragment outside that vocabulary, whatever it learns. With
+the complete train-fold vocabulary, **exact top-1 is capped at 28.6%**.
+
+Against a field at ~18% top-1 this is not fatal, but ~10 points of headroom is
+not a comfortable margin, and it shrinks as the field improves. It is a ceiling
+of the same kind as the proposal's verifier ceiling (C3), sitting on the
+representation rather than the oracle, and the two stack.
+
+Three qualifications. It caps **exact** top-1 only; MCES distance and Tanimoto
+degrade gracefully. It is measured on 5,000 train molecules, so it is a lower
+bound on what the full 194k-spectrum train fold supports. And MassSpecGym's
+MCES>=10 split is *designed* to make held-out structures distant, so a large
+unseen-fragment share is the split working as intended, not a defect.
+
+The escape is vocabulary scale, and it should be cheap: fragments recur across
+molecules far more than molecules recur. E0-c measures it.
+
+### This reopens the BRICS-vs-rBRICS decision
+
+E0-a chose BRICS on compression (14.4x vs 9.0x) before this ceiling was known.
+Finer fragments recur more often, so rBRICS should have a **higher** ceiling —
+and rBRICS already showed better in-sample top-V coverage (0.138 vs 0.099 at
+V=100). The decision is now a trade between compression and ceiling rather than
+a clear win, and E0-c measures both arms before it stands.

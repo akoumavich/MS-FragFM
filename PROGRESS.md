@@ -4,6 +4,51 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-19 — Held-out vocabulary: a representational ceiling at 28.6%, and a decision reopened
+
+Preflight 8/8 (`setuptools` fixed `torch.compile`).
+
+**The finding: 71.4% of MassSpecGym test molecules contain at least one BRICS
+fragment that never appears in the train fold.** The complete train-fold
+vocabulary therefore caps exact top-1 at **28.6%**, and the top-V curve is flat
+from V=2,000 — the missing fragments are not rare training fragments, they are
+absent from the training molecules entirely. Details in RESULTS.md R3.
+
+This matters because the field sits at ~18% top-1. Ten points of headroom on a
+ceiling imposed by our own representation is not comfortable, and it is a
+ceiling of the same kind as C3's verifier ceiling, sitting on the representation
+instead of the oracle. The two stack. It caps *exact* top-1 only — MCES and
+Tanimoto degrade gracefully — and MassSpecGym's MCES>=10 split is designed to
+make held-out structures distant, so a large unseen-fragment share is the split
+working as intended rather than a defect. It is still the binding number.
+
+**I was wrong to close the BRICS-vs-rBRICS question yesterday.** I dropped
+rBRICS on compression alone (9.0x vs 14.4x) before measuring held-out coverage.
+Finer fragments recur more, so rBRICS should have a *higher* ceiling, and it
+already showed better in-sample top-V coverage (0.138 vs 0.099 at V=100). That
+is a trade between compression and ceiling, not a straight loss. Reopened; E0-c
+measures both arms.
+
+**New experiment E0-c (`scripts/vocab_ceiling.py`).** Does the ceiling lift with
+vocabulary scale, and how fast? Harvest fragments from the benchmark's
+4M-molecule MCES-2-disjoint corpus at 5k -> 1M molecules and re-measure test
+coverage, for both decompositions. Fragments recur across molecules far more
+than molecules recur, so this should lift substantially; if it does, the fix is
+CPU-only and cheap, and it becomes a concrete argument for the pretraining half
+of the plan rather than a scaling claim taken on faith. The script decomposes
+the largest slice once and reads nested prefixes off it, so the whole curve
+costs a single pass.
+
+If the ceiling stays low even at 1M molecules, the representation needs an
+atom-level escape hatch for unseen fragments, and that is a week-3 design change
+rather than a week-9 surprise.
+
+**Fixed:** `gdown` 5.x dropped `--id`; the bare file id still works.
+
+**Next:** E0-c, then E0-b throughput once the FragFM checkpoints land.
+
+---
+
 ## 2026-09-19 — E0-a done. Base decomposition settled; compression is 2-4x better than budgeted
 
 Preflight is green apart from `torch.compile`, and that had nothing to do with

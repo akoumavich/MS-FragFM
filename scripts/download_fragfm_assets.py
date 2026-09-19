@@ -24,7 +24,8 @@ def main():
         archive = dest / name
         if not archive.exists():
             subprocess.run(
-                [sys.executable, "-m", "gdown", "--id", file_id, "-O", str(archive)],
+                # gdown 5.x dropped --id; the bare id is still accepted.
+                [sys.executable, "-m", "gdown", file_id, "-O", str(archive)],
                 check=True,
             )
         print(f"extracting {archive} -> {dest}")
