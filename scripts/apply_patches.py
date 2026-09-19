@@ -66,6 +66,48 @@ PATCHES = [
     return mol""",
     ),
     dict(
+        name="fragfm-single-lmdb-open",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "FragFMGenerator opens the fragment LMDB, then hands the same path to "
+            "FragFMDataset, which opens it again.  py-lmdb 2.x refuses a second "
+            "open of one environment in a process; the lmdb==1.5.1 that FragFM "
+            "pins allowed it.  Build the dataset first and share its handle."
+        ),
+        marker="Reuse the dataset's handle",
+        old="""        # get fragment lmdb env
+        self.frag_env = lmdb.open(
+            cfg.frag_data_dirn,
+            readonly=True,
+            lock=False,
+            readahead=True,
+            meminit=False,
+            map_size=100000000,
+        )
+        self.n_all_frag = int(self.frag_env.stat()["entries"])  # exc. mask
+
+        # get test set and loader
+        self.test_set = FragFMDataset(
+            lmdb_fn=self.cfg.data_dirn,
+            frag_lmdb_fn=self.cfg.frag_data_dirn,
+            frag_smi_to_idx_fn=self.cfg.frag_smi_to_idx_fn,
+            data_split=self.cfg.fragment_bag,
+            debug=self.cfg.debug,
+        )""",
+        new="""        # get test set and loader
+        self.test_set = FragFMDataset(
+            lmdb_fn=self.cfg.data_dirn,
+            frag_lmdb_fn=self.cfg.frag_data_dirn,
+            frag_smi_to_idx_fn=self.cfg.frag_smi_to_idx_fn,
+            data_split=self.cfg.fragment_bag,
+            debug=self.cfg.debug,
+        )
+        # Reuse the dataset's handle rather than opening a second environment on
+        # the same path, which py-lmdb 2.x rejects.
+        self.frag_env = self.test_set.frag_env
+        self.n_all_frag = int(self.frag_env.stat()["entries"])  # exc. mask""",
+    ),
+    dict(
         name="fragfm-drop-unused-draw-import",
         paths=[
             THIRD_PARTY / "FragFM" / "process" / "process_fragment_from_lmdb.py",
