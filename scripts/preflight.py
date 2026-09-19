@@ -43,6 +43,8 @@ def _():
     name = torch.cuda.get_device_name(0)
     mem = torch.cuda.get_device_properties(0).total_memory / 2**30
     a = torch.randn(4096, 4096, device=dev, dtype=torch.bfloat16)
+    for _ in range(5):  # cuBLAS handle init + kernel autotune, else it dominates
+        a @ a
     torch.cuda.synchronize()
     t0 = time.perf_counter()
     for _ in range(20):
@@ -75,9 +77,12 @@ def _():
     return "fragfm.process + fragfm.model.flow import clean"
 
 
-@check("fragfm BRICS decomposition on natural products")
+@check("fragfm BRICS decomposition + round-trip")
 def _():
+    from rdkit import Chem
+
     from fragfm.process import process_sample
+    from fragfm.utils.mol_ops import reconstruct_to_rdmol
 
     # Representative MassSpecGym-style chemistry: flavonoid, alkaloid, macrolide-ish,
     # peptide-like, and a halogenated drug.
@@ -91,9 +96,14 @@ def _():
     ]
     out = []
     for smi in smis:
+        ref = Chem.CanonSmiles(smi)
         s = process_sample({"smi": smi, "data_type": "npgen", "decomp_method": "brics"})
-        out.append(f"{s['n_frag']}f/{len(s['h'])}a")
-    return "n_frag/n_atom(with H): " + " ".join(out)
+        # The fragment reordering permutes atoms; rebuilding from the permuted
+        # tensors must give the same molecule back, or the reordering map is wrong.
+        got = Chem.MolToSmiles(reconstruct_to_rdmol(s["h"], s["e_index"], s["e"]))
+        assert got == ref, f"round-trip mismatch: in={ref} out={got}"
+        out.append(f"{s['n_frag']}f/{Chem.MolFromSmiles(smi).GetNumHeavyAtoms()}a")
+    return "round-trip exact; n_frag/n_heavy: " + " ".join(out)
 
 
 @check("ms-pred oracle imports")

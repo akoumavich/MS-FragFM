@@ -30,6 +30,9 @@ source .venv/bin/activate
 
 uv pip install "torch==${TORCH_VER}" torchvision==0.21.0 \
   --index-url "https://download.pytorch.org/whl/${CUDA_TAG}"
+# The cu124 index carries no triton, and --index-url suppresses PyPI, so
+# torch's triton==3.2.0 dependency is silently skipped and torch.compile fails.
+uv pip install "triton==3.2.0"
 uv pip install dgl \
   -f "https://data.dgl.ai/wheels/torch-2.6/${CUDA_TAG}/repo.html"
 uv pip install torch-scatter torch-sparse \
@@ -46,6 +49,8 @@ uv pip install --no-deps "descriptastorus @ git+https://github.com/bp-kelley/des
 uv pip install pandas-flavor  # descriptastorus runtime dep, installed above with --no-deps
 
 uv pip install -e . --no-deps
+
+THIRD_PARTY="$THIRD_PARTY" python scripts/apply_patches.py
 
 echo
 echo "Env ready: $REPO_ROOT/.venv"
