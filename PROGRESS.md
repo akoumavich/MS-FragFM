@@ -4,6 +4,66 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-19 — E0-e: z carries attachment almost entirely. R6 confirmed, severe end
+
+**Result.** Coarse graph held at ground truth, only z varied, FragFM's released
+NPGen autoencoder. Exact graph reconstruction: **98.7% with the encoded z, 9.4%
+with a prior z.** The coarse fragment graph does not determine attachment — z
+carries essentially the whole decision. Method D's per-fragment advantages have
+nothing to land on for attachment errors. This is the "pile B is large" case,
+not the limitation-paragraph case. Full table in RESULTS.md R7.
+
+The noised arms bound the flow's job: accuracy is intact at s=0.25 (97.9%), down
+8 points at s=0.5, down 33 at s=1.0. z must be predicted to well under one
+standard deviation in AE latent space.
+
+**Correcting my own experiment.** The script's headline line read
+"attachment information carried by z: 0.9872 -> 0.0940, drop = 0.8932", which
+invites reading 9.4% as a forecast of generator accuracy. It is not. The flow
+*evolves* z during sampling — `_calc_euler_step` integrates
+`z_rate = (pred_z - gen_z)/(1-t)` — so the z reaching the decoder is a learned
+function of the coarse-graph trajectory, not the prior draw it started from. The
+prior arm answers "is z redundant" (no); the noised arms answer "how hard is the
+flow's job". Headline corrected in the script.
+
+**The MassSpecGym number is confounded and must not be quoted yet.** Encoded-z
+accuracy is 64.6% there against 98.7% on NPGen, with two causes entangled: the
+checkpoint was trained on BRICS and is being fed rBRICS, and it was trained on
+COCONUT natural products and is being applied to broader chemistry. Running
+MassSpecGym through BRICS separates them and costs two minutes.
+
+This is the second factor of the ceiling, so it matters: 0.823 x 0.646 = 0.53 if
+the zero-shot figure held. It should not — the autoencoder gets retrained on
+MassSpecGym regardless, and 98.7% in-distribution is the target.
+
+**The question that decides architecture vs limitation paragraph.** If attachment
+is carried by z, is the true molecule recoverable by *searching* over z? Added
+`--multiplicity K`: decode each ground-truth coarse graph under K prior draws,
+count distinct molecules, check whether the true one appears.
+
+- High recall at modest K -> attachment is a *search* problem. The oracle ranks z
+  samples at test time, no architecture change, and the credit question reduces
+  to how efficiently the policy proposes z.
+- Low recall -> z is a genuine bottleneck. Fix, in order of preference: discrete
+  attachment sites (make "which site of fragment A bonds to fragment B"
+  categorical like every other node and edge, so it flows through the same
+  machinery and takes credit like anything else, at the cost of a ragged
+  categorical dimension), then a per-bond latent, which is the smaller code
+  change and the weaker answer.
+
+**Keep separate from C3 in the writeup.** Some isomer pairs are indistinguishable
+because their simulated spectra genuinely are near-identical — verifier ceiling,
+not credit assignment. A reviewer who conflates them reads an architecture fix as
+papering over a fundamental limit. E0-e is clean by construction: the oracle is
+never in the loop.
+
+**Fixed:** E0-b built a fresh generator per step count, which LMDB rejects
+(second open of one environment in a process) and which would also re-embed all
+54k fragments each time. Now builds once and varies `n_euler_step`, passing
+fragment counts explicitly so batch size varies without rebuilding the loader.
+
+---
+
 ## 2026-09-19 — Fragment bag built; E0-e answers the attachment question without training
 
 **Fragment bag is built.** 54,095 fragments, 53,220 with nonzero train

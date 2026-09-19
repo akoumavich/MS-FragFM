@@ -358,3 +358,84 @@ the MassSpecGym LMDB (`scripts/build_msg_lmdb.py`).
 If reconstruction is lossy, the options are a per-edge latent instead of a
 per-molecule one, or reporting it as a limitation. That is a week-3 architecture
 decision, not a week-12 discovery.
+
+---
+
+## R7 — E0-e: attachment is carried almost entirely by z
+
+`scripts/e0e_attachment.py` @ `119b67d` · FragFM's released NPGen autoencoder ·
+coarse graph held at ground truth, only z varied
+
+| z source | NPGen edge acc | NPGen graph acc | MSG edge acc | MSG graph acc |
+| --- | ---: | ---: | ---: | ---: |
+| encoded | 0.9986 | **0.9872** | 0.9321 | **0.6462** |
+| noised s=0.1 | 0.9985 | 0.9856 | 0.9314 | 0.6449 |
+| noised s=0.25 | 0.9980 | 0.9788 | 0.9285 | 0.6310 |
+| noised s=0.5 | 0.9911 | 0.9100 | 0.9164 | 0.5896 |
+| noised s=1.0 | 0.9466 | 0.6561 | 0.8765 | 0.4456 |
+| prior | 0.6750 | **0.0940** | 0.6495 | **0.0320** |
+
+NPGen = in-distribution for this checkpoint (COCONUT natural products, BRICS).
+MSG = MassSpecGym test fold, rBRICS, zero-shot.
+
+### z is not redundant, and R6's concern is confirmed at the severe end
+
+With the coarse graph fixed at ground truth and z drawn from the prior, graph
+accuracy is **9.4%** in-distribution against 98.7% with the encoded z. So the
+coarse fragment graph does **not** determine attachment: z carries essentially
+the whole decision. Method D's per-fragment advantages have nothing to land on
+for attachment errors, exactly as R6 feared. This is the "pile B is large" case,
+not the "limitation paragraph" case.
+
+The noised arms bound what the flow must achieve: accuracy is intact to s=0.25
+(97.9%), costs 8 points at s=0.5, and 33 points at s=1.0. So z must be predicted
+to well under one standard deviation in AE latent space.
+
+**Do not read 9.4% as a forecast of generator accuracy.** The flow evolves z
+during sampling — `_calc_euler_step` integrates `z_rate = (pred_z - gen_z)/(1-t)`
+— so the z reaching the decoder is a learned function of the coarse-graph
+trajectory, not the prior draw it started from. The prior arm measures whether z
+is redundant (it is not); the noised arms measure how hard the flow's job is.
+The script's earlier summary line overstated this and has been corrected.
+
+### The MassSpecGym number is confounded, and the confound matters
+
+Encoded-z graph accuracy is 64.6% on MassSpecGym against 98.7% on NPGen. Two
+causes are entangled:
+
+1. **Decomposition mismatch** — the checkpoint was trained on BRICS fragments and
+   is being fed rBRICS ones.
+2. **Chemistry mismatch** — trained on COCONUT natural products, applied to
+   MassSpecGym's broader chemistry.
+
+Running MassSpecGym through BRICS separates them, and it is cheap. Until then
+64.6% cannot be quoted as anything.
+
+It matters because this is the second factor of the ceiling:
+
+> ceiling on exact top-1 = P(fragments in pool) x P(reconstruction correct)
+
+= 0.823 x 0.646 = **0.53** if the zero-shot number held, which it should not:
+the autoencoder will be retrained on MassSpecGym regardless, and 98.7%
+in-distribution is what a retrained one should approach.
+
+### The question that decides whether this needs an architecture change
+
+If attachment is carried by z, is the true molecule recoverable by *searching*
+over z? `--multiplicity K` decodes each ground-truth coarse graph under K
+prior draws and reports how many distinct molecules come out and whether the true
+one is among them.
+
+- **High recall at modest K** — attachment is a search problem. The oracle ranks
+  z-samples at test time, no architecture change, and the RL credit issue is
+  confined to how efficiently the policy proposes z.
+- **Low recall** — z is a bottleneck and needs discrete attachment sites (make
+  "which site of fragment A bonds to fragment B" categorical, so it flows through
+  the same discrete machinery and takes credit like every other variable) or a
+  per-bond latent.
+
+**Keep this separate from C3.** Some isomer pairs are indistinguishable because
+their predicted spectra genuinely are near-identical — that is the verifier
+ceiling, not a credit-assignment failure, and conflating them makes an
+architecture fix look like papering over a fundamental limit. E0-e is clean by
+construction: the oracle is never in the loop.
