@@ -278,3 +278,83 @@ lower: generate in the units the evidence is expressed in, and *select* in them
 too. Unlike occurrence-weighted sampling it is instance-specific, which is what
 the conditional setting calls for. Measuring how far formula and peak filtering
 prune an 81,739-fragment pool, and what coverage survives, is E0-d.
+
+---
+
+## R5 — E0-c, rBRICS arm: the E0-a decomposition decision is reversed
+
+Same run, rBRICS arm. Coverage of the same 3,160 test structures.
+
+| fragment pool | BRICS vocab | BRICS cov. | rBRICS vocab | rBRICS cov. |
+| --- | ---: | ---: | ---: | ---: |
+| MSG train fold (full) | 9,296 | 0.445 | 7,326 | **0.544** |
+| corpus 20k | 13,071 | 0.487 | 10,680 | **0.607** |
+| corpus 50k | 26,780 | 0.579 | 20,054 | **0.712** |
+| corpus 100k | 45,754 | 0.644 | 32,135 | **0.768** |
+| corpus 200k | 77,361 | 0.707 | 50,873 | **0.812** |
+| corpus + train 200k | 81,739 | 0.725 | 53,220 | **0.823** |
+
+**rBRICS reaches higher coverage with a 35% smaller pool, at every scale.** Finer
+fragments recur across molecules more often, so each one is worth more: rBRICS
+needs 53,220 fragments to cover 82.3% of test structures where BRICS needs
+81,739 to cover 72.5%.
+
+### Decision: rBRICS, reversing E0-a
+
+E0-a chose BRICS on edge-slot compression (14.4x vs 9.0x) before coverage was
+measured. Scoring the two on all three axes that matter:
+
+| axis | BRICS | rBRICS | binding? |
+| --- | ---: | ---: | --- |
+| edge-slot reduction | **14.4x** | 9.0x | no — both far above the 3-6x budgeted |
+| test coverage @200k | 0.725 | **0.823** | yes — caps exact top-1 |
+| pool fraction per bag draw (384/pool) | 0.47% | **0.72%** | yes — see R4 step coupling |
+
+rBRICS wins the two axes that bind and loses the one with slack. The compression
+lever has room to give: 9.0x still triples the proposal's budgeted 3-6x, and
+compression trades against a ceiling that nothing else can buy back.
+
+The pool-fraction column is the one that changed my mind. R4 found that the bag
+is redrawn every Euler step, so a smaller pool is explored more thoroughly per
+draw — and that advantage compounds exactly when step count is cut for speed.
+rBRICS is 1.5x better there *and* covers more. The two effects point the same
+way, which is not something the compression number could have told us.
+
+Cost: 8.6 fragments per molecule instead of 7.1, and ~20% slower to decompose.
+
+---
+
+## R6 — The attachment-point variable is global (flagged from a parallel review)
+
+Verified in code. `FragFMGenerator.sample_molecule_graph_dynamic` draws
+`gen_z = torch.randn(bs, latent_z_dim)` — **one latent per molecule**, not per
+fragment or per edge. `AE.decode` turns it into a single graph-level embedding
+(`ae.py:205`) and predicts the inter-fragment bonds from it plus per-atom
+features.
+
+So the flow model's generative variables are: coarse fragment-graph nodes, coarse
+fragment-graph edges, and one global `z`. Fragment identity and fragment-level
+connectivity are per-node and per-edge, and fragment-level advantage shaping
+lands on them cleanly. **Attachment-point choice has only the global `z` to land
+on**, so for that failure mode the structured advantage of Method D degrades to a
+scalar — which is exactly the aggregation loss the proposal criticises FRIGID for.
+
+This matters because attachment-point errors are the isomer confusions MS/MS is
+worst at: the right fragments joined the wrong way.
+
+How much it matters is measurable and not yet measured. The decoder is
+deterministic given (coarse graph, z), so if FragFM's coarse-to-fine
+reconstruction is near-lossless on MassSpecGym chemistry then attachment is
+nearly determined by the coarse graph and `z` carries little of the decision. The
+experiment is FragFM's own `exe/eval_ae.py` run on a MassSpecGym LMDB, which also
+yields a number worth having on its own:
+
+> **ceiling on exact top-1 = P(all fragments in pool) x P(coarse-to-fine
+> reconstruction correct)**
+
+0.823 for the first factor at a 200k pool. The second is unmeasured, and it needs
+the MassSpecGym LMDB (`scripts/build_msg_lmdb.py`).
+
+If reconstruction is lossy, the options are a per-edge latent instead of a
+per-molecule one, or reporting it as a limitation. That is a week-3 architecture
+decision, not a week-12 discovery.

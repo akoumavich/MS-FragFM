@@ -4,6 +4,68 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-19 — rBRICS reverses the E0-a decision; the attachment latent is global
+
+**Decomposition: rBRICS, not BRICS.** E0-a chose BRICS on edge-slot compression
+(14.4x vs 9.0x) before coverage existed as a number. With the rBRICS arm in,
+rBRICS reaches **higher coverage with a 35% smaller pool at every scale**: 82.3%
+vs 72.5% of test structures at a 200k-molecule pool, from 53,220 fragments
+against 81,739. Finer fragments recur across molecules more, so each one is worth
+more. Full table in RESULTS.md R5.
+
+Scoring all three axes: compression is *not* binding (9.0x still triples the
+proposal budget of 3-6x), coverage is (it caps exact top-1), and pool fraction
+per bag draw is (384/53,220 = 0.72% against 0.47%). rBRICS wins both binding axes
+and loses the one with slack.
+
+The pool-fraction column is what decided it, and it only exists because of
+yesterday's finding that the bag is redrawn every Euler step: a smaller pool is
+explored more thoroughly per draw, and that advantage compounds exactly when step
+count is cut for speed. Compression could not have told us this. Cost: 8.6
+fragments per molecule instead of 7.1, ~20% slower to decompose.
+
+**The attachment-point latent is global — verified, and it dents C2.** Flagged by
+a parallel review and confirmed in the code: `gen_z = torch.randn(bs,
+latent_z_dim)` is one latent *per molecule*, and `AE.decode` turns it into a
+single graph-level embedding (`ae.py:205`) from which inter-fragment bonds are
+predicted. So the generative variables are coarse nodes, coarse edges, and one
+global z. Fragment identity and fragment connectivity take per-variable
+advantages cleanly; **attachment-point choice has only z**, so for that failure
+mode Method D's structured advantage degrades to a scalar — the same aggregation
+loss the proposal criticises FRIGID for, arriving through a different door. It
+bites because attachment errors are the isomer confusions MS/MS resolves worst:
+right fragments, wrong joins.
+
+Not yet quantified, and it is quantifiable. The decoder is deterministic given
+(coarse graph, z), so if coarse-to-fine reconstruction is near-lossless on
+MassSpecGym chemistry then attachment is nearly determined by the coarse graph
+and z carries little of the decision. Week-3 architecture decision either way,
+per RESULTS.md R6.
+
+**A quantity that gates everything, and is cheap.** The ceiling on exact top-1
+factorises as P(all fragments of the target are in the pool) x P(coarse-to-fine
+reconstruction correct) = 0.823 x (unmeasured) at a 200k rBRICS pool. That
+product bounds every accuracy number the project can report, independent of
+generator, oracle and RL. Promoted in the proposal to a week-1 item rather than
+an ablation.
+
+**Built:** `scripts/build_msg_lmdb.py` — decomposes MassSpecGym into FragFM's
+LMDB format with train_/valid_/test_ key prefixes taken from the benchmark's own
+folds, so FragFM's `process_fragment_from_lmdb.py` runs unchanged afterwards.
+Prerequisite for measuring the second ceiling factor and for any training.
+
+**Converging independently:** a parallel reading of FragFM reached the same
+conclusion about spectrum-conditioning the bag. Their reweighting hook already
+exists in code — `random_select_frags_by_occurance` multiplies the occurrence
+prior by `exp(-bag_guide_strength * property_mse)` when a discriminator is loaded
+— so the mechanism is a drop-in. Our version is stronger than a learned property
+score: subformula-of-precursor is an exact constraint, not a prediction.
+
+**Next:** build the MassSpecGym LMDB, then coarse-to-fine reconstruction accuracy
+(the second ceiling factor). E0-b throughput still pending.
+
+---
+
 ## 2026-09-19 — R3 retracted. The bag is swappable; the cost is coupled to step count
 
 **Correction, prompted by Mohsen.** R3 called the unseen-fragment rate a
