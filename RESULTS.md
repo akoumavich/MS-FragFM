@@ -13,7 +13,7 @@ data it was taken on. Narrative and decisions live in [PROGRESS.md](PROGRESS.md)
 | --- | --- |
 | Stack | py 3.11.16 · torch 2.6.0+cu124 · numpy 2.4.6 · rdkit 2025.03.6 · pyg 2.8.0.post1 · dgl 2.5.0+cu124 |
 | bf16 dense matmul (4096^3, warmed) | **219 TFLOP/s** |
-| `torch.compile` (inductor) | fixed — `triton` imports `setuptools`, absent from a uv venv |
+| `torch.compile` (inductor) | pass (after installing `setuptools`) |
 | FragFM imports under numpy 2 / rdkit 2025.03 | pass |
 | FragFM BRICS decomposition + round-trip | pass, exact on 6/6 |
 | ms-pred GLACIER + ICEBERG import | pass |
@@ -109,3 +109,43 @@ say the fragment-level lever is stronger than the proposal assumed, and that the
 100x target has more headroom than the budget table suggests. E0-b (wall-clock
 sampling) converts it into a real number; until then 3-6x stays the planning
 figure.
+
+### R2.1 — distribution detail (BRICS, relaxed)
+
+| quantity | value |
+| --- | ---: |
+| mean heavy atoms | 27.9 |
+| mean fragments | 7.06 |
+| fragments, p95 | 15 |
+| fragments, max | 31 |
+| molecules that do not decompose (1 fragment) | 1.9% |
+| edge-slot reduction, aggregate | 14.4x |
+| edge-slot reduction, mean of per-molecule ratios | 33.7x |
+
+Two notes. Mean heavy-atom count is **27.9**, not the 23 the proposal's budget
+arithmetic assumes, so the atom-level baseline is worse than assumed and the
+reduction correspondingly larger. And the aggregate ratio (14.4x) is the honest
+one: the mean of per-molecule ratios reads 33.7x because it is dominated by
+small molecules, where a 3-fragment decomposition of a 23-atom molecule gives
+253/3. Aggregate is reported everywhere else in this file.
+
+At p95 = 15 fragments the fragment graph has 105 edge slots, so the dense
+fragment-level edge tensor stays small enough that sparsity engineering is a
+second-order concern at this level — unlike at atom level.
+
+**Vocabulary coverage below is in-sample and therefore not yet meaningful** —
+the vocabulary was fitted on the same 5,000 molecules it was scored against, so
+top-V reaches 1.0 the moment V exceeds the 3,485-entry vocabulary. Recorded only
+to be superseded by the held-out run.
+
+| top-V | in-sample coverage |
+| ---: | ---: |
+| 100 | 0.099 |
+| 500 | 0.383 |
+| 1000 | 0.547 |
+| 5000 | 1.000 (trivial) |
+
+Even in-sample, a 1,000-fragment fixed vocabulary fully covers only 55% of
+molecules. That is already an argument that a fixed vocabulary is the wrong
+design and FragFM's stochastic fragment bag is load-bearing rather than a
+refinement. The held-out number will be worse.
