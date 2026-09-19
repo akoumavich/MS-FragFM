@@ -30,9 +30,11 @@ source .venv/bin/activate
 
 uv pip install "torch==${TORCH_VER}" torchvision==0.21.0 \
   --index-url "https://download.pytorch.org/whl/${CUDA_TAG}"
-# The cu124 index carries no triton, and --index-url suppresses PyPI, so
-# torch's triton==3.2.0 dependency is silently skipped and torch.compile fails.
-uv pip install "triton==3.2.0"
+# triton ships with torch but imports setuptools at runtime, and a uv venv has no
+# setuptools by default -- so `import triton` raises ModuleNotFoundError, torch's
+# has_triton() silently returns False, and torch.compile fails claiming triton is
+# "not installed or too old".  The missing package is setuptools, not triton.
+uv pip install setuptools
 uv pip install dgl \
   -f "https://data.dgl.ai/wheels/torch-2.6/${CUDA_TAG}/repo.html"
 uv pip install torch-scatter torch-sparse \
