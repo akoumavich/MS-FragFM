@@ -4,6 +4,58 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-19 — Fragment bag built; E0-e answers the attachment question without training
+
+**Fragment bag is built.** 54,095 fragments, 53,220 with nonzero train
+occurrence, from the MassSpecGym train fold plus 200k MCES-2-disjoint corpus
+molecules. Zero dropped in `process_frag`. FragFM's NPGen checkpoints and
+processed data are in place, so E0-b is unblocked.
+
+**E0-e: measure the attachment question now, not after training.** The
+disciplined version of R6 is to sort a trained model's errors into "wrong
+fragment multiset" and "right multiset, wrong attachment" and count them — a
+limitation paragraph at 20%, an architecture problem at 70%. That needs a trained
+conditional model, which is weeks away. There is a training-free lower-bound
+version available today, and it isolates the variable more cleanly:
+
+> hold the coarse graph at ground truth, vary only z, watch reconstruction.
+
+If reconstruction from a prior-sampled z matches reconstruction from the encoded
+z, then attachment is determined by the coarse graph, z carries nothing, and the
+concern is void. If it collapses, z carries attachment information that
+per-fragment credit cannot reach. Either way the answer arrives in week 1 instead
+of week 9, and it does not confound the question with model quality — the error
+sort cannot separate "z is a bad carrier" from "the policy is undertrained",
+whereas this holds everything else at ground truth.
+
+The `prior` arm reproduces generation-time z exactly, including the min-max
+inverse `store_smis_from_coarse_graph` applies: the generator does not feed a
+standard normal to the decoder, and testing a raw normal would have measured the
+wrong distribution.
+
+Worth noting FragFM's own `exe/eval_ae.py` carries a commented-out
+`z = z + torch.randn_like(z) * 0.2` probe. The authors asked this question and
+did not publish the answer.
+
+**If z does carry attachment information**, the fixes in preference order are
+discrete attachment sites — make "which site of fragment A bonds to fragment B" a
+categorical variable like every other node and edge, so it flows through the same
+machinery and receives credit like anything else, at the cost of a ragged
+categorical dimension — then a per-bond latent, which is a smaller change to
+their code and less elegant.
+
+**Keep this separate from C3 when writing up.** Some isomer pairs are
+indistinguishable because their predicted spectra genuinely are nearly identical.
+That is the verifier ceiling, not a credit-assignment failure, and a reviewer who
+conflates them will read an architecture fix as papering over a fundamental
+limit. The two are separable by construction: E0-e holds the oracle out of the
+loop entirely.
+
+**Next:** E0-e on NPGen (in-distribution, clean) then on MassSpecGym (transfer).
+E0-b throughput now unblocked.
+
+---
+
 ## 2026-09-19 — MassSpecGym decomposed; own fragment-bag builder; two tooling bugs
 
 **MassSpecGym is decomposed.** 31,561 of 31,602 structures (99.87%) under
