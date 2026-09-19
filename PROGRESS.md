@@ -4,6 +4,77 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-19 — E0 complete. C1 is retired as a contribution; the attachment redesign is on
+
+Week 1's blocking measurements are done, and between them they reshape the plan.
+
+### The speed problem does not exist
+
+Stock FragFM: **0.338 s/sample at 500 steps, 0.068 s at 20**, batch 256 on one
+A100. That is 388x DiffMS and 19x FRIGID with nothing built. The GRPO epoch that
+the proposal called impossible at 30 days is **23 minutes on 8 GPUs**. The week-6
+gate of <2 s/sample was passed in week 1 with 6x margin. (RESULTS.md R8.)
+
+This is good for the project and bad for C1 *as a contribution*. A speedup that
+requires no work is an observation about the base model, not a result, and it
+cannot carry a section. C1 now appears once, with the measurement, as the premise
+that makes C2 possible. The weeks budgeted for speedup work move to C2.
+
+**The step lever is capped at 5.8x, not the 25x budgeted**, because decode is a
+flat 52-59 ms/sample floor that step count does not touch — 17% of cost at 500
+steps, 90% at 10. Concretely: **do not do the distillation work.** FS-DFM, T3D
+and Duo all attack flow-step count, worth ~2x from a sensible operating point.
+ReMDM and correctors stay, for quality at low step counts, which is a different
+argument. This is the finding the phase split was built to catch, and an
+end-to-end number would have hidden it.
+
+**One unbudgeted cost.** Generator startup embeds the whole fragment pool: 4m35s
+for 133,823 fragments. Harmless for inference, fatal under GRPO where the
+fragment embedder is part of the policy and any update invalidates every
+embedding. Freeze the embedder and train only the coarse GNN, or embed the drawn
+bag on demand. Decide before writing the RL loop.
+
+### The attachment latent: R7 stands, magnitude corrected
+
+The `shuffled` control — hand the decoder another molecule's *encoded* latent,
+in-distribution by construction — gives **19.5%** exact reconstruction against
+98.7% with the right one. So z is molecule-specific and carries the attachment
+decision.
+
+My prior arm *was* confounded, as suspected: prior draws are 4.4x wider than the
+encoder's range (std 3.80 vs 0.869), because the min-max inverse is calibrated
+for the flow's t=1 output and I fed it a standard normal. That inflated the
+effect from 19.5% to 9.4%. **The conclusion is unchanged; the number was.** The
+R9 z-search figures sampled the same bad distribution and are withdrawn.
+
+Read cleanly: for about one molecule in five attachment is determined by the
+coarse graph alone; for the other four in five z carries it, and z is a single
+global continuous vector with no per-fragment structure. That is the architecture
+case, and it arrived in week 1 rather than week 12. Weeks 5-6, freed by the speed
+result, now go to discrete attachment sites.
+
+### The decomposition choice has a decidable criterion
+
+The MassSpecGym 64.6% was decomposition mismatch, not chemistry: the same
+NPGen-trained autoencoder reconstructs **94.9%** of MassSpecGym zero-shot when
+fed BRICS. Transfer across chemistry costs 3.8 points; transfer across
+decomposition costs 30.
+
+Both ceiling factors multiply: BRICS gives 0.725 x 0.949 = **0.688**, rBRICS
+gives 0.823 x p. **rBRICS wins iff a retrained autoencoder reaches p > 0.836 on
+rBRICS fragments** — not assured, since rBRICS means more fragments and more
+junctions and attachment is the harder half of the job. Retraining on each
+settles it, and the autoencoder is being retrained regardless.
+
+### Next
+
+1. Retrain the autoencoder on MassSpecGym, both decompositions -> settles rBRICS
+   vs BRICS and gives the real second ceiling factor.
+2. Discrete attachment sites.
+3. Spectrum conditioning, which is now the critical path rather than speed.
+
+---
+
 ## 2026-09-19 — E0-e: z carries attachment almost entirely. R6 confirmed, severe end
 
 **Result.** Coarse graph held at ground truth, only z varied, FragFM's released

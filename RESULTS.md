@@ -585,3 +585,49 @@ In-distribution by construction, and molecule-specific information is destroyed.
 Added, along with a print of the encoded vs prior latent ranges so the
 saturation hypothesis is visible rather than inferred. **R7's conclusion is
 provisional until this runs.**
+
+---
+
+## R10 — The control run: R7 stands, magnitude corrected
+
+| z source | NPGen (BRICS) | MSG (BRICS) |
+| --- | ---: | ---: |
+| encoded | 0.9872 | 0.9491 |
+| noised s=0.5 | 0.9102 | 0.8608 |
+| noised s=1.0 | 0.6560 | 0.6028 |
+| **shuffled** (another molecule's encoded z) | **0.1945** | **0.1519** |
+| prior | 0.0940 | 0.0573 |
+
+Latent scale, NPGen: encoded std 0.869, range [-3.72, 4.01]; prior draws std
+3.800, range [-12.18, 13.60].
+
+**The out-of-distribution hypothesis was right, and it does not change the
+conclusion.** Prior draws really are ~4.4x too wide, so the 9.4% figure was
+partly decoder saturation. The correct in-distribution control gives **19.5%**.
+Handing the decoder a perfectly valid latent belonging to a different molecule
+still collapses exact reconstruction from 98.7% to 19.5%.
+
+So z is molecule-specific and carries the attachment decision. **R7 stands; only
+its magnitude was wrong** (19.5%, not 9.4%).
+
+A cleaner way to read 19.5%: for about one molecule in five, attachment is
+determined by the coarse fragment graph alone and any latent will do. For the
+other four in five, z carries real information — and z is a single global
+continuous vector with no per-fragment structure for an advantage to land on.
+
+That is the architecture case, not the limitation-paragraph case, and it arrived
+in week 1.
+
+### Two corrections this forces on earlier results
+
+**The z-search number in R9 is also confounded** and should not be quoted. It
+sampled the same too-wide prior, so its 3.0 distinct molecules and 13.3% recall
+measure saturation, not the reachable attachment set. A meaningful z-search
+perturbs around an in-distribution latent.
+
+**`draw_z` models the wrong thing.** The min-max inverse is applied in
+`store_smis_from_coarse_graph` to the *flow's output* at t=1, which the flow
+learns to keep within [-1,1] because that is what the transform normalised
+training latents to. Applying the same inverse to a standard normal models the
+t=0 initialisation, not what the decoder is ever handed. The prior arm is
+retained as a diagnostic and is no longer the basis of any claim.
