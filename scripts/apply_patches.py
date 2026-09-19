@@ -64,6 +64,23 @@ PATCHES = [
     return mol""",
     ),
     dict(
+        name="fragfm-drop-unused-draw-import",
+        paths=[
+            THIRD_PARTY / "FragFM" / "process" / "process_fragment_from_lmdb.py",
+            THIRD_PARTY / "FragFM" / "process" / "process_to_lmdb.py",
+            THIRD_PARTY / "FragFM" / "exe" / "eval_ae.py",
+            THIRD_PARTY / "FragFM" / "exe" / "train_ae.py",
+        ],
+        why=(
+            "These four import rdkit.Chem.Draw and never use it.  Draw needs "
+            "libXrender.so.1, absent from the cluster image and un-installable "
+            "without root, so an unused import blocks the entire preprocessing "
+            "and autoencoder path."
+        ),
+        old="from rdkit.Chem import QED, Crippen, Descriptors, Draw",
+        new="from rdkit.Chem import QED, Crippen, Descriptors",
+    ),
+    dict(
         name="mspred-lazy-plot-import",
         path=THIRD_PARTY / "ms-pred" / "src" / "ms_pred" / "common" / "__init__.py",
         why=(
@@ -95,20 +112,22 @@ def main():
 
     n_applied = n_already = 0
     for p in PATCHES:
-        src = p["path"].read_text(encoding="utf-8")
-        if p["new"] in src:
-            print(f"  already  {p['name']}")
-            n_already += 1
-            continue
-        if p["old"] not in src:
-            print(f"  STALE    {p['name']}: anchor not found in {p['path']}")
-            sys.exit(2)
-        if args.check:
-            print(f"  pending  {p['name']}")
-            continue
-        p["path"].write_text(src.replace(p["old"], p["new"], 1), encoding="utf-8")
-        print(f"  applied  {p['name']}")
-        n_applied += 1
+        for path in p.get("paths", [p.get("path")]):
+            src = path.read_text(encoding="utf-8")
+            label = f"{p['name']}:{path.name}" if "paths" in p else p["name"]
+            if p["new"] in src:
+                print(f"  already  {label}")
+                n_already += 1
+                continue
+            if p["old"] not in src:
+                print(f"  STALE    {label}: anchor not found in {path}")
+                sys.exit(2)
+            if args.check:
+                print(f"  pending  {label}")
+                continue
+            path.write_text(src.replace(p["old"], p["new"], 1), encoding="utf-8")
+            print(f"  applied  {label}")
+            n_applied += 1
 
     print(f"{n_applied} applied, {n_already} already present")
 
