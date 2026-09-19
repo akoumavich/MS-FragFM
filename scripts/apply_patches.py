@@ -33,6 +33,8 @@ PATCHES = [
         name="fragfm-reconstruct-remove-h-body",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "utils" / "mol_ops.py",
         why="Second half of the above: honour remove_h at the return site.",
+        # `old` survives inside `new`, so anchor absence cannot detect this one.
+        marker="if not remove_h:",
         old="""    if get_largest:
         # get largest connected component
         mol = valid_mol_can_with_seg(mol, largest_connected_comp=get_largest)
@@ -115,14 +117,19 @@ def main():
         for path in p.get("paths", [p.get("path")]):
             src = path.read_text(encoding="utf-8")
             label = f"{p['name']}:{path.name}" if "paths" in p else p["name"]
-            # Test the anchor first.  When `new` is a prefix of `old` -- as when a
-            # patch only deletes a trailing item from an import list -- checking
-            # `new in src` first reports every unpatched file as already done.
+            # Deciding "already applied" is fiddly in both directions: `new` can
+            # be a prefix of `old` (deleting a trailing import), and `old` can be
+            # a substring of `new` (wrapping a block, which leaves the anchor in
+            # place and invites re-application on every run).  A patch that wraps
+            # its anchor must therefore give an explicit `marker` unique to the
+            # patched state; the rest are decided by anchor absence.
+            marker = p.get("marker")
+            applied = marker in src if marker else (p["old"] not in src and p["new"] in src)
+            if applied:
+                print(f"  already  {label}")
+                n_already += 1
+                continue
             if p["old"] not in src:
-                if p["new"] in src:
-                    print(f"  already  {label}")
-                    n_already += 1
-                    continue
                 print(f"  STALE    {label}: anchor not found in {path}")
                 sys.exit(2)
             if args.check:

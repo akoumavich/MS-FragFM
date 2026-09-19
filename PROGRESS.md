@@ -4,6 +4,61 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-19 — MassSpecGym decomposed; own fragment-bag builder; two tooling bugs
+
+**MassSpecGym is decomposed.** 31,561 of 31,602 structures (99.87%) under
+rBRICS+relaxed in 116s on 64 cores, written to FragFM's LMDB format with the
+benchmark's own fold prefixes.
+
+**We now build the fragment bag ourselves** (`scripts/build_fragment_bag.py`),
+replacing FragFM's `process_fragment_from_lmdb.py`. Two reasons, and the second
+is the real one:
+
+1. Their script hard-codes a dataset whitelist to choose the strict/relaxed
+   branch and raises `NotImplementedError` on anything else.
+2. It reads exactly one source LMDB. E0-c says the pool must be harvested from a
+   large external corpus, not from MassSpecGym alone — 54.4% to 82.3% test
+   coverage. Pooling several sources is a requirement, not a convenience.
+
+**A leakage trap in the bag mechanism, found while writing it.**
+`random_select_frags_by_occurance` samples with `p = occurrence/sum` and
+`replace=False`, so **a fragment with zero occurrence in the selected split is
+unreachable**. Harvest a pool from the corpus while counting occurrences only
+over MassSpecGym, and every corpus fragment is inert — the pool looks large and
+behaves as if it were not. The coverage gain E0-c measured would have silently
+failed to materialise, and the symptom would have been "the big pool did not
+help", which is not obviously a bug.
+
+So `train_occurance` is written as *everything the generator may draw from*: the
+MassSpecGym train fold plus the external corpus. That is sound precisely because
+the corpus is MassSpecGym's own MCES-2-disjoint release, built to be distant from
+the test fold. MassSpecGym val/test counts are recorded for diagnostics and never
+folded into the train bag.
+
+**Two bugs in my own patch tool, both of the same family.** Deciding "already
+applied" is fiddly in both directions, and I got it wrong in each:
+
+- `new` a *prefix* of `old` (the Draw patch deletes a trailing import): checking
+  `new in src` first marked every unpatched file as done. The tool reported
+  success and changed nothing.
+- `old` a *substring* of `new` (the `remove_h` body patch wraps its anchor):
+  after fixing the above by testing the anchor first, this one re-applied on
+  every run, stacking duplicate copies of an unreachable early-return block.
+
+Now: a patch that wraps its anchor must declare an explicit `marker` unique to
+the patched state; everything else is decided by anchor absence. Both failure
+modes are named in a comment so the next patch does not rediscover them.
+
+The second bug means `FragFM/fragfm/utils/mol_ops.py` on the cluster has a
+duplicated block — harmless, since the duplicate is unreachable, but it must be
+reset before it grows.
+
+**Next:** fragment bag, then coarse-to-fine reconstruction accuracy — the
+unmeasured second factor of the top-1 ceiling. E0-b throughput still pending on
+the Drive assets.
+
+---
+
 ## 2026-09-19 — rBRICS reverses the E0-a decision; the attachment latent is global
 
 **Decomposition: rBRICS, not BRICS.** E0-a chose BRICS on edge-slot compression
