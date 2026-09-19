@@ -67,6 +67,11 @@ def evaluate(model, loader, z_mode, transform, sigma, seed):
         )
         if z_mode == "noised":
             z = z + torch.randn_like(z) * sigma
+        elif z_mode == "shuffled":
+            # Another molecule's *encoded* z: in-distribution by construction, so
+            # this isolates "is z molecule-specific" from "is the decoder being
+            # fed an out-of-distribution latent", which the prior arm confounds.
+            z = z[torch.randperm(z.size(0), device=z.device)]
         elif z_mode == "prior":
             z = draw_z(z, transform)
         pred = torch.sigmoid(model.decode(
@@ -191,9 +196,23 @@ def main():
     if transform is None:
         print("[warn] no latent_transform_param.pkl; z draws use a raw normal")
 
+    # Are prior draws even inside the encoded range?  If not, the prior arm
+    # measures decoder behaviour off-distribution rather than what z carries.
+    with torch.no_grad():
+        g = next(iter(loader))
+        g.to("cuda")
+        ze, _ = model.encode(g.h, g.h_junction_count, g.h_in_frag_label,
+                             g.h_aux_frag_label, g.e_index, g.e, g.batch)
+        zp = draw_z(ze, transform)
+        zstats = {
+            "encoded_std": ze.std().item(), "encoded_min": ze.min().item(),
+            "encoded_max": ze.max().item(), "prior_std": zp.std().item(),
+            "prior_min": zp.min().item(), "prior_max": zp.max().item(),
+        }
+
     arms = ([("encoded", None)]
             + [("noised", s) for s in (0.1, 0.25, 0.5, 1.0)]
-            + [("prior", None)])
+            + [("shuffled", None), ("prior", None)])
     rows = []
     print(f"{len(ds)} molecules from {args.data} [{args.split}]\n")
     print(f"{'z source':<14} {'edge acc':>9} {'graph acc':>10}")
@@ -204,10 +223,18 @@ def main():
             rows.append({"z_source": label, **r})
             print(f"{label:<14} {r['edge_acc']:>9.4f} {r['graph_acc']:>10.4f}")
 
-        enc, pri = rows[0]["graph_acc"], rows[-1]["graph_acc"]
-        print(f"\nz is redundant iff prior ~= encoded: {pri:.4f} vs {enc:.4f}")
-        print("Noised arms bound how precisely the flow must predict z; `prior` "
-              "is a floor, not a generator forecast, since the flow evolves z.")
+        by = {r["z_source"]: r["graph_acc"] for r in rows}
+        print(f"\nencoded {by['encoded']:.4f} | shuffled {by['shuffled']:.4f} "
+              f"| prior {by['prior']:.4f}")
+        print("`shuffled` is the arm that matters: another molecule's encoded z, "
+              "so in-distribution by construction.")
+        print("`prior` is confounded -- the min-max inverse maps a normal as if it "
+              "were uniform on [-1,1], so draws land outside the encoded range and "
+              "may simply be off-distribution.")
+        print(f"\nz scale: encoded std {zstats['encoded_std']:.3f} range "
+              f"[{zstats['encoded_min']:.2f}, {zstats['encoded_max']:.2f}] | "
+              f"prior std {zstats['prior_std']:.3f} range "
+              f"[{zstats['prior_min']:.2f}, {zstats['prior_max']:.2f}]")
 
         if args.multiplicity:
             m = multiplicity(model, loader, transform, args.multiplicity, args.mult_n)
@@ -219,7 +246,7 @@ def main():
             print(f"  true molecule recovered within K    : {m['recall_at_k']:.3f}")
 
     path = RESULTS / f"e0e_attachment_{args.tag}.json"
-    path.write_text(json.dumps(rows, indent=2))
+    path.write_text(json.dumps(rows + [{"z_source": "_zstats", **zstats}], indent=2))
     print(f"\nwrote {path}")
 
 

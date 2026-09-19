@@ -439,3 +439,149 @@ their predicted spectra genuinely are near-identical — that is the verifier
 ceiling, not a credit-assignment failure, and conflating them makes an
 architecture fix look like papering over a fundamental limit. E0-e is clean by
 construction: the oracle is never in the loop.
+
+---
+
+## R8 — E0-b: the speed problem is already solved, and the step lever is capped
+
+`scripts/e0b_throughput.py` @ `6a72b32` · FragFM NPGen checkpoint, unconditional,
+batch 256, 1x A100-80GB · 2 timed repeats after a warmup
+
+| steps | flow ms/sample | decode ms/sample | total s/sample | decode share |
+| ---: | ---: | ---: | ---: | ---: |
+| 500 | 278.81 | 58.83 | **0.338** | 0.17 |
+| 200 | 112.14 | 55.88 | 0.168 | 0.33 |
+| 100 | 56.33 | 57.16 | 0.113 | 0.50 |
+| 50 | 28.57 | 56.85 | 0.085 | 0.67 |
+| 20 | 11.47 | 56.58 | 0.068 | 0.83 |
+| 10 | 5.61 | 52.14 | **0.058** | 0.90 |
+
+Flow time is exactly linear in step count: 0.558 ms/step at 500, 0.561 at 10.
+
+### The headline: C1's premise no longer holds
+
+The proposal's scalability argument is built on DiffMS at 131.2 s/spectrum and a
+100x speedup being the enabling condition for everything else. **Unmodified
+FragFM at its default 500 steps already runs at 0.338 s/sample** — 388x faster
+than DiffMS and 19x faster than FRIGID's 6.58 s/spectrum, before any of the
+planned speedup work.
+
+Rerunning the GRPO arithmetic that motivated the whole budget: G=16 over 10,000
+spectra is 160,000 generations. At 0.338 s that is 15 GPU-hours per epoch; at 20
+steps, 3.0 GPU-hours, or **23 minutes on 8 GPUs**. The proposal budgeted 44
+GPU-hours post-speedup and called the pre-speedup version impossible at 30 days
+per epoch. We are 15x better than its optimistic case, with the stock model.
+
+The week-6 gate (<2 s/sample) is already met with 6x margin.
+
+Caveat: this is unconditional generation on NPGen, not spectrum-conditioned
+elucidation. Conditioning adds an encoder and cross-attention, but that cost is
+per sample and small next to 500 flow steps. The order of magnitude stands.
+
+### The step lever is capped at ~5.8x, not 25x
+
+Decode — the coarse-to-fine autoencoder plus Blossom assembly — is a **hard floor
+at 52-59 ms/sample that step count does not move**. So cutting 500 steps to 20
+cuts flow time 24x but total time only **5.0x**; going to 10 steps buys 5.8x
+total and nothing further is available from this lever.
+
+This is exactly what the phase split was built to catch, and it would have been
+invisible in an end-to-end number. The proposal's budget table lists ~25x for
+step reduction; the true end-to-end ceiling is 5.8x, and past 50 steps the
+returns are already mostly gone.
+
+The practical consequences are the opposite of alarming:
+
+- **Don't do the distillation work.** FS-DFM, T3D and Duo all attack flow-step
+  count, which is now worth at most 5.8x and realistically ~2x from the operating
+  point we would choose. ReMDM and corrector steps stay useful for *quality* at
+  low step counts, not for speed.
+- **If more speed is ever wanted, optimise decode**, which is 83% of the cost at
+  20 steps and largely CPU (Blossom assembly runs unbatched, one molecule at a
+  time, at 100-280 molecules/s).
+- **Validity degrades gracefully**: 98.2% at 500 steps, 94.9% at 20, 91.6% at 10,
+  so the low-step regime is usable.
+
+### A cost the proposal does not account for
+
+Instantiating the generator embeds the entire fragment pool up front: **4m35s for
+NPGen's 133,823 fragments**. Fine once for inference. Under GRPO the fragment
+embedder is part of the policy, so any update to it invalidates every embedding —
+4.6 minutes per policy step is fatal. Either freeze the fragment embedder during
+RL and train only the coarse GNN, or embed the drawn bag on demand instead of
+precomputing the pool. Freezing is the simpler answer and is defensible: the
+embedder is a structural encoder, and the policy has the coarse GNN to adapt
+with. Decide before the RL loop is written.
+
+(Note also that NPGen's own released pool is 133,823 fragments, 2.5x the 53,220
+we built from 200k corpus molecules. Pool size is affordable.)
+
+---
+
+## R9 — The 64.6% was decomposition mismatch; and the rBRICS decision now has a number to beat
+
+Same autoencoder (FragFM's released NPGen checkpoint), MassSpecGym test fold,
+BRICS instead of rBRICS.
+
+| z source | NPGen (BRICS) | MSG (BRICS) | MSG (rBRICS) |
+| --- | ---: | ---: | ---: |
+| encoded | 0.9872 | **0.9491** | 0.6462 |
+| noised s=0.25 | 0.9788 | 0.9373 | 0.6310 |
+| noised s=0.5 | 0.9101 | 0.8608 | 0.5896 |
+| noised s=1.0 | 0.6561 | 0.6028 | 0.4456 |
+| prior | 0.0940 | 0.0573 | 0.0320 |
+
+**The confound resolves almost entirely to decomposition, not chemistry.** The
+NPGen-trained autoencoder reconstructs **94.9%** of MassSpecGym molecules exactly,
+zero-shot, when fed BRICS fragments — against 98.7% in its own distribution. A
+3.8-point drop across COCONUT natural products to MassSpecGym's broader chemistry
+is excellent transfer. The 64.6% on rBRICS was the autoencoder being fed a
+decomposition it was never trained on.
+
+### The rBRICS decision now has a decidable criterion
+
+Both ceiling factors multiply, and they pull in opposite directions:
+
+| decomposition | pool coverage | reconstruction | ceiling |
+| --- | ---: | ---: | ---: |
+| BRICS | 0.725 | 0.949 (measured, zero-shot) | **0.688** |
+| rBRICS | 0.823 | unknown, needs a retrained AE | 0.823 x p |
+
+**rBRICS wins iff a retrained autoencoder reaches p > 0.836 on rBRICS
+fragments.** That is not a foregone conclusion: rBRICS cuts more finely, so
+molecules carry more fragments (8.6 vs 7.1) and more junctions, and attachment
+prediction is the harder half of the job. Retraining the autoencoder on each
+decomposition settles it, and the autoencoder gets retrained regardless.
+
+Both numbers are also floors — 0.725 and 0.823 are pool coverage at 200k corpus
+molecules, and the corpus holds 4M.
+
+### My prior arm is confounded, and `shuffled` is the control that fixes it
+
+The z-search run is the reason to distrust it. Over K=32 prior draws per coarse
+graph: **3.0 distinct molecules on average** (max 9), and the true molecule
+recovered **13.3%** of the time — barely above the 9.4% a single draw achieves.
+Thirty-two draws behaving like one means the draws are not exploring; the decoder
+is collapsing most of the prior mass onto a handful of outputs.
+
+That is the signature of an out-of-distribution input, not of an informative
+latent. And there is a mechanism: `store_smis_from_coarse_graph` maps z by
+`(z+1) * 0.5 * (max-min) + min`, which treats a standard normal as if it were
+uniform on [-1,1]. About 32% of a normal's mass lies outside [-1,1], so prior
+draws land beyond the encoded range, where the decoder saturates.
+
+So the prior arm may be measuring decoder saturation rather than the information
+z carries, and the 9.4% cannot be read as "the coarse graph determines almost
+nothing" until that is excluded.
+
+**The control is `shuffled`: give the decoder another molecule's *encoded* z.**
+In-distribution by construction, and molecule-specific information is destroyed.
+
+- shuffled ~ encoded -> z carries little molecule-specific attachment
+  information, the prior result was an artifact, and R7's alarm is withdrawn.
+- shuffled ~ prior -> z genuinely carries the attachment decision, R7 stands, and
+  the discrete-attachment redesign is on.
+
+Added, along with a print of the encoded vs prior latent ranges so the
+saturation hypothesis is visible rather than inferred. **R7's conclusion is
+provisional until this runs.**
