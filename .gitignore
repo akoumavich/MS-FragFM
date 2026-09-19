@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+data/
+save/
+wandb/
+results/raw/
+*.lmdb
+*.ckpt
+.DS_Store

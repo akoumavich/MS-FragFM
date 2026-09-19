@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "msfragfm"
+version = "0.0.1"
+description = "Spectrum-conditioned fragment-level graph flow matching for MS/MS structure elucidation"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  # Torch / PyG / DGL are installed by scripts/setup_env.sh from the pinned
+  # wheel indices; they are deliberately not listed here.
+  "numpy>=2",
+  "pandas",
+  "scipy",
+  "scikit-learn",
+  "rdkit==2025.3.*",
+  "lmdb",
+  "easydict",
+  "PyYAML",
+  "tqdm",
+  "huggingface_hub",
+  "pyarrow",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["msfragfm*"]
