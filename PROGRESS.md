@@ -4,6 +4,65 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-19 — E0-a done. Base decomposition settled; compression is 2-4x better than budgeted
+
+Preflight is green apart from `torch.compile`, and that had nothing to do with
+triton. **triton was installed the whole time; it imports `setuptools` at
+runtime, and a uv venv ships without setuptools.** torch's `has_triton()`
+swallows the `ImportError` and reports triton as "not installed or too old",
+which sends you auditing the wrong package. Installing `setuptools` is the fix.
+Noted because the error message is actively misleading.
+
+**E0-a result (see RESULTS.md R2): BRICS with relaxed canonicalisation.**
+99.8% of MassSpecGym decomposes, 7.1 fragments per molecule, 14.4x edge-slot
+reduction, 3,485 distinct fragments over 5,000 structures, 2.1 mol/s/core.
+
+Three things follow.
+
+*FragFM stays the base.* The question E0-a existed to answer was whether
+FragFM's decomposition survives MassSpecGym chemistry. At 99.8% it does, so the
+FlowMS/DiffMS fallback is off the table and week 3-4 can commit to conditioning
+FragFM rather than hedging.
+
+*rBRICS is a straight loss here, which was not obvious.* It cuts more finely --
+8.6 fragments instead of 7.1 -- and that makes compression *worse*, 9.0x against
+14.4x, because more fragments means more fragment-level edge slots. It is also
+slower to compute. Finer decomposition is not a free upgrade; this project wants
+fewer, larger generative units, and that is also what keeps the GRPO horizon
+short. Dropping rBRICS from consideration.
+
+*Relaxed canonicalisation is the chemically correct setting, not a leniency
+knob.* It differs from strict only in allowing a formal charge on N/O/S carrying
+excess valence, and MassSpecGym contains genuinely charged species. It recovers
+2.6% of structures that strict silently drops.
+
+**The compression lever measures 14.4x against 3-6x budgeted.** Proposal updated,
+but conservatively: the edge-slot ratio is a structural bound, not a speedup --
+the coarse-to-fine autoencoder and everything linear in node count do not shrink
+with it. 3-6x stays the planning figure until E0-b measures wall-clock. What the
+number does say is that the 100x target has more headroom than the budget table
+assumed.
+
+**Adduct is a conditioning input.** v1.5 carries `[M+H]+` (195,237) and
+`[M+Na]+` (35,867). Sodiated species fragment differently from protonated ones
+and they are 15.5% of the data, so the model should be told which it is looking
+at rather than inferring the charge carrier from the peaks. Added to Method A's
+conditioning list; it is nearly free.
+
+**Preprocessing is cheap enough not to plan around.** 134 mol/s on 64 cores puts
+the 31,602 MassSpecGym structures at ~4 minutes and the benchmark's 4M-molecule
+MCES-2-disjoint pretraining corpus at ~8.3 hours on one node.
+
+**Still open:** the fragment vocabulary top-V coverage curve — 3,485 distinct
+fragments over 5,000 molecules implies a long tail, and how long decides how
+hard FragFM's stochastic fragment bag has to work. Measured, not yet read back.
+
+**Next:** E0-b, wall-clock sampling throughput of unconditioned FragFM from the
+released checkpoint. That is the number the proposal calls blocking, and it
+sizes group size, training-set size and the whole RL schedule.
+
+---
+
 ## 2026-09-19 — Preflight round 1: 4/8. Four fixes, one of them an upstream bug
 
 Environment built on the A100 without incident (torch 2.6.0+cu124, numpy 2.4.6,
