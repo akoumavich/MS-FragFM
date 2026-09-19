@@ -31,6 +31,8 @@ def main():
             REPO, FILES[key], repo_type="dataset", local_dir=RAW.parent / "_hf"
         )
         dest = RAW / FILES[key].split("/")[-1]
+        if dest.is_symlink():
+            dest.unlink()  # may be stale/broken, which .exists() reports as False
         if not dest.exists():
             dest.symlink_to(path)
         print(f"{key:18s} -> {dest}")
