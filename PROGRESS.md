@@ -4,6 +4,56 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-19 — R3 retracted. The bag is swappable; the cost is coupled to step count
+
+**Correction, prompted by Mohsen.** R3 called the unseen-fragment rate a
+"representational ceiling", which implies a limit set by the training data. That
+is wrong. FragFM has no fragment-identity embedding table: `FragToVect`
+(`fragfm/model/flow.py:11`) encodes each candidate from its own graph — atomic
+numbers, junction counts, bond types, message passing — so a fragment never seen
+in training is embedded and scored like any other. The candidate pool is a data
+artifact loaded at inference and swappable. This is precisely the fixed-
+vocabulary trap FragFM was built to escape, and I wrote it up as though the trap
+were still there. The R3 numbers are correct; the conclusion was not. Retracted
+in RESULTS.md R4.
+
+**Read correctly, E0-c is a design curve and it is encouraging.** Coverage of the
+test fold: 44.5% from the full train fold (9,296 fragments), 72.5% from 200k
+corpus molecules (81,739 fragments), still climbing steeply with 4M available.
+R3's alarming 0.286 was an artifact of harvesting from only 5,000 molecules. The
+pool is a knob, and a cheap CPU-only one.
+
+**What reading the mechanism did surface — and this one is real.** The bag is
+redrawn at **every Euler step** (`mol_generator.py:398-412`): 384 fragments by
+occurrence weighting, unioned with whatever is already placed. A 500-step
+generation is 500 independent draws, i.e. a stochastic search over the pool.
+
+So **cutting 500 steps to 20 also cuts bag resampling 25-fold.** The proposal's
+budget table treats step reduction and fragment-level representation as
+independent multiplicative levers; they are not. Pool scale and step count pull
+against each other — a larger pool raises the ceiling but needs more draws to
+exploit, and cutting steps shrinks exploration exactly when the pool is largest.
+FragFM never cuts steps, so its paper never had to confront this. This would have
+surfaced in week 6 as an unexplained quality collapse under step reduction.
+
+**The fix is on-thesis, which is why I think it is right rather than convenient.**
+Stop drawing the bag by occurrence and select it from the spectrum. MS/MS peaks
+*are* fragment masses: admissible fragments have formulas that are subformulas of
+the precursor, and informative ones match observed peaks within tolerance. Both
+constraints are exact, free to evaluate, and instance-specific — which is what
+the conditional setting needs and what occurrence weighting cannot provide. A
+spectrum-filtered bag raises coverage and removes the step-count dependence
+together, because few draws suffice once the candidates are right.
+
+That is the proposal's thesis applied one level lower: generate in the units the
+evidence is expressed in, and *select* in them too. Added to Method A as a fourth
+conditioning signal, flagged as conditioning the support rather than the network.
+
+**Next:** E0-d — how far do formula and peak filtering prune an 81,739-fragment
+pool, and what coverage survives. Then E0-b throughput, still pending.
+
+---
+
 ## 2026-09-19 — Held-out vocabulary: a representational ceiling at 28.6%, and a decision reopened
 
 Preflight 8/8 (`setuptools` fixed `torch.compile`).

@@ -205,3 +205,76 @@ Finer fragments recur more often, so rBRICS should have a **higher** ceiling —
 and rBRICS already showed better in-sample top-V coverage (0.138 vs 0.099 at
 V=100). The decision is now a trade between compression and ceiling rather than
 a clear win, and E0-c measures both arms before it stands.
+
+---
+
+## R4 — E0-c: the ceiling is a property of the inference-time bag, not of training
+
+`scripts/vocab_ceiling.py --corpus-n 200000` @ `b5f4af6` · BRICS, relaxed ·
+test = 3,160 MassSpecGym test-fold structures
+
+**R3's framing was wrong and is retracted.** R3 called the unseen-fragment rate a
+"representational ceiling", which implies a limit set by the training data.
+FragFM has no fragment-identity embedding table: `FragToVect` encodes a fragment
+from its own graph — atomic numbers, junction counts, bonds, message passing —
+so a fragment never seen in training can still be embedded and scored. The
+candidate pool is a data artifact, loaded at inference and swappable. R3's
+numbers are correct; the conclusion drawn from them was not.
+
+| fragment pool | molecules | vocabulary | coverage of test |
+| --- | ---: | ---: | ---: |
+| MSG train fold (5k sample, R3) | 5,000 | 3,117 | 0.286 |
+| MSG train fold (full) | 25,023 | 9,296 | 0.445 |
+| MCES-2-disjoint corpus | 5,000 | 4,476 | 0.345 |
+| corpus + train | 5,000 | 12,260 | 0.496 |
+| corpus | 20,000 | 13,071 | 0.487 |
+| corpus + train | 20,000 | 19,711 | 0.562 |
+| corpus | 50,000 | 26,780 | 0.579 |
+| corpus + train | 50,000 | 32,480 | 0.624 |
+| corpus | 100,000 | 45,754 | 0.644 |
+| corpus + train | 100,000 | 50,782 | 0.669 |
+| corpus | 200,000 | 77,361 | 0.707 |
+| **corpus + train** | **200,000** | **81,739** | **0.725** |
+
+Read as a design curve, not a limit. Coverage is still climbing steeply at 200k
+molecules and the corpus holds 4M, so the pool is a knob and it is a cheap one —
+CPU-only, ~8 hours for the full 4M on one node. R3's 0.286 was an artifact of
+harvesting from 5,000 molecules; the full train fold alone gives 0.445.
+
+### What the bag mechanism actually does, and the cost it hides
+
+`mol_generator.py:398-412`: at **every Euler step** the sampler draws a fresh
+`n_base_frag` fragments (384 in the released config) by occurrence-weighted
+sampling without replacement, unions them with the fragments already placed in
+the graph, and predicts over that union. Fragments already placed persist. So a
+500-step generation makes 500 independent draws of 384 fragments from the pool,
+with the current state carried along — a stochastic search over the pool, not a
+single fixed bag.
+
+**This couples the two largest levers in Method B, which the budget treats as
+independent.** Cutting 500 Euler steps to 20 does not only incur the
+factorization error of section 7; it also cuts bag resampling from 500 draws to
+20, shrinking the explored pool by the same 25x. The larger the pool, the worse
+this bites: at 200k molecules the pool is 81,739 fragments, and 20 draws of 384
+occurrence-weighted samples touch a vanishing share of it.
+
+So pool scale and step count pull against each other. Growing the pool raises the
+coverage ceiling but needs more draws to exploit; cutting steps for speed shrinks
+exploration exactly when the pool is largest. Neither the proposal nor FragFM's
+paper addresses this, because FragFM never cuts steps.
+
+### The escape, and it is on-thesis
+
+Stop sampling the bag by occurrence and select it from the spectrum. MS/MS peaks
+*are* fragment masses: every fragment worth considering has a formula that is a
+subformula of the precursor, and the informative ones have masses matching
+observed peaks within tolerance. A spectrum-filtered pool is small, targeted and
+free to compute, which raises coverage and removes the dependence on step count
+at the same time — few draws suffice when the candidates are already the right
+ones.
+
+This is the same argument the proposal's thesis already makes, applied one level
+lower: generate in the units the evidence is expressed in, and *select* in them
+too. Unlike occurrence-weighted sampling it is instance-specific, which is what
+the conditional setting calls for. Measuring how far formula and peak filtering
+prune an 81,739-fragment pool, and what coverage survives, is E0-d.
