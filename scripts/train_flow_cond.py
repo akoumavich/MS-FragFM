@@ -126,7 +126,7 @@ def main():
     run = tracking.init(tag, config={
         **vars(args),
         "n_train_spectra": len(ds["train"]),
-        "n_fragments": ds["train"].n_all_frag,
+        "n_fragments": ds["train"].n_total_frag,
         "params_total": sum(p.numel() for p in params),
         "params_spectrum_encoder":
             sum(p.numel() for p in cond_model.parameters()) if cond_model else 0,
