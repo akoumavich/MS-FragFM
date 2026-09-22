@@ -4,6 +4,63 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-22 — E8 added: mode collapse under GRPO, and a correction to Method D
+
+Checked the literature rather than assuming. Mode collapse under policy-gradient
+RL is **the reported default in three separate literatures**, not an edge case:
+
+- **RLVR on LLMs.** GRPO raises Pass@1 while degrading Pass@k; entropy falls
+  early and keeps falling. The mechanism transfers verbatim: the objective is
+  *indifferent to how probability mass is distributed among correct solutions*,
+  so mass concentrates on a narrow subset of them, self-reinforcingly.
+- **RL on diffusion.** DDPO samples cluster around the highest-scoring outputs.
+- **RL on molecular generators.** Known since REINVENT, and standard equipment
+  rather than a finding: diversity filters with scaffold memory buckets.
+
+**A correction to Method D.** The proposal said KL regularisation to the base
+policy "prevents collapse". It does not. KL-regularised RL is variational
+inference against a Gibbs posterior, which concentrates mass on high-reward
+regions by construction -- forward and reverse KL both *induce* collapse rather
+than resist it. KL bounds how far the policy drifts, which is a real defence
+against reward hacking and forgetting, but it says nothing about spread at the
+destination. Corrected, and collapse now has its own instrument.
+
+**Why this threatens C2 rather than just sample quality.** The headline claim is
+an accuracy-versus-oracle-calls curve that shifts left. A collapsed policy
+returns near-duplicates within a group, so extra oracle calls buy nothing and the
+curve **flattens instead of shifting**. Collapse can raise top-1 and destroy the
+comparison the paper rests on simultaneously.
+
+**Kept separate from reward hacking**, because each can hide the other. Reward
+hacking is a high oracle score on a wrong molecule, caught by the held-out slice.
+Collapse is loss of spread, invisible to that slice whenever the collapsed mode
+happens to be correct.
+
+**The conditional setting inverts the usual diagnostic**, and this is the part
+that would have been easy to get wrong. Property optimisation wants diverse hits,
+so concentration is bad. Elucidation has one right answer per spectrum, so
+concentrating *within* a spectrum is the goal. The failure is concentration
+*across* spectra -- the policy emitting the same fragments whatever it is shown,
+i.e. having stopped conditioning. A falling within-spectrum diversity number is
+therefore ambiguous, and the informative quantity is the ratio of across-spectrum
+to within-spectrum variation. The spectrum-blind arm already gives the reference
+value for that ratio.
+
+**E8 instruments**, logged from the first RL step rather than added once
+something looks wrong: policy entropy per generative variable; unique valid
+molecules per group; top-k versus k against the base policy; accuracy versus
+oracle calls against the base policy; and fragment-usage distribution against the
+base, which is a diagnostic the representation gives us and string models cannot
+-- collapse should show up as the effective fragment vocabulary shrinking.
+
+Mitigations listed in order of evidence and applied only if the instruments fire:
+a fragment-level diversity filter on the REINVENT pattern, entropy
+regularisation, DAPO's clip-higher, and the choice of divergence.
+
+No code yet: this lands when GRPO does. E3 is still training.
+
+---
+
 ## 2026-09-22 — Decomposition settled: BRICS. Ceiling measured at 0.71
 
 Fine-tuned the released NPGen autoencoder on MassSpecGym for both
