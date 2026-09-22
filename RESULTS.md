@@ -841,3 +841,52 @@ Against a field at ~18% top-1 this is comfortable headroom — roughly 4x — wh
 is the answer to the question R3 raised and mis-framed. It is worth reporting in
 the paper regardless: no published de novo method states the ceiling its own
 representation imposes, and ours is now measured rather than assumed.
+
+---
+
+## R14 — E3 probe: conditioning is live
+
+One epoch each, batch 256, identical seeds and schedule, MassSpecGym BRICS,
+193,948 training spectra.
+
+| loss component | spectrum-blind | spectrum-conditioned | delta |
+| --- | ---: | ---: | ---: |
+| fragment type | 7.3567 | **6.9555** | **-0.4012** |
+| latent z | 0.2741 | **0.2186** | **-0.0555** (-20%) |
+| coarse edge | 0.3676 | 0.3773 | +0.0097 |
+| total | 37.4253 | 35.3732 | -2.0521 |
+
+The spectrum reaches the model and is used. Fragment type and latent both
+improve, which is the expected pattern: the spectrum says which fragments are
+present and roughly how they are arranged, and says little about coarse
+connectivity directly. The edge difference is within noise at one epoch.
+
+This is the check that catches a silently inert conditioning path. A `cond`
+tensor that never reached `g_embd`, or an encoder whose output was ignored,
+would produce a perfectly normal-looking loss curve, because the unconditional
+model still learns the fragment distribution. Only the paired control detects
+it, and it cost 20 minutes against a 5-hour run.
+
+### Two things the probe exposed
+
+**The warmup schedule was wrong for this dataset.** FragFM's
+`lr_warmup_iter: 10000` was set for MOSES, which is 1.6M molecules and ~6,300
+iterations per epoch. MassSpecGym is 757 iterations per epoch at batch 256, so
+warmup would not have finished until **epoch 13**, and the probe ran at 7.6% of
+target learning rate. Now configurable, default 2,000.
+
+Both probe arms were affected identically, so the comparison stands; but both
+are much less trained than their epoch count suggests. Absolute losses here are
+not comparable to the earlier batch-64 run, which took 3,030 steps in its epoch
+and reached fragment loss 3.03.
+
+**Fragment-bag embedding is a fixed per-batch cost.** Batch 64 ran at 0.60
+s/batch and batch 256 at 0.87, so quadrupling the batch cost only 45% more
+time — the ~384-fragment bag is rebuilt and pushed through the 5-layer
+`FragToVect` every step regardless of batch size. Epoch time falls from 30
+minutes to 11.
+
+This is the same cost R8 found at generation startup (4m35s to embed 133k
+fragments), seen from the training side. It matters for GRPO: if the fragment
+embedder is frozen there, the cost vanishes and the embeddings can be cached
+once.

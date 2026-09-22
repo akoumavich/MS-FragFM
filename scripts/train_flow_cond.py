@@ -52,6 +52,10 @@ def main():
     ap.add_argument("--bs", type=int, default=256)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--n-peaks", type=int, default=60)
+    ap.add_argument("--warmup", type=int, default=2000,
+                    help="FragFM's 10000 was set for MOSES at 6.3k iters/epoch; "
+                         "here an epoch is 757 iters, so it would not finish "
+                         "warming up until epoch 13")
     ap.add_argument("--tag", default=None)
     args = ap.parse_args()
     tag = args.tag or f"flow_{args.cond}"
@@ -71,6 +75,7 @@ def main():
     cfg.is_resume = False
     cfg.n_iter_done = 0
     cfg.lr = args.lr
+    cfg.lr_warmup_iter = args.warmup
 
     stem = Path(args.data).stem
     ds = {f: make_spectrum_dataset(
