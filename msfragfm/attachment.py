@@ -1,69 +1,69 @@
-"""Discrete attachment sites.
+"""Discrete attachment: per-atom choose-k over candidate partners.
 
 FragFM scores each candidate attachment pair independently with a sigmoid and a
-BCE loss, conditioned on a single per-molecule latent z.  E0-e (RESULTS.md R7,
-R10) showed that z carries the attachment decision for roughly four molecules in
-five, which leaves GRPO nothing per-fragment to assign attachment credit to.
+BCE loss, conditioned on one per-molecule latent z.  E0-e (RESULTS.md R7, R10,
+R11) showed z carries the attachment decision even through the real Blossom
+decode, which leaves GRPO nothing per-fragment to assign attachment credit to.
 
-The candidate set is already the right object.  For each coarse edge -- each
-bonded fragment pair A-B -- the candidates are the (junction atom of A, junction
-atom of B) pairs, and exactly one of them is the real bond.  That is a
-categorical variable per coarse edge, not a set of independent binary ones.
+Three granularities were considered; the measurements picked the third.
 
-Treating it as categorical does three things at once: it puts "exactly one bond
-per coarse edge" in the support rather than leaving it to the loss, it gives each
-coarse edge its own discrete variable for advantages to land on, and it removes
-the need for z to carry attachment at all.
+*Per coarse edge* -- "which atom pair joins fragments A and B" -- is invalid.
+rBRICS cuts rings, and a cut ring joins its two fragments **twice**: 7.7% of
+rBRICS coarse edges carry two bonds, against 0% for BRICS.  A formulation that
+only works for one decomposition is the wrong formulation.
 
-The group ids are derived at load time from fragment membership, so no
-reprocessing of the LMDBs is needed.
+*Per slot* -- expand each junction atom into one slot per open valence, as
+Blossom already does -- always takes exactly one partner.  But slots on the same
+atom are interchangeable, so a per-slot categorical is degenerate under
+relabelling.
+
+*Per atom, choosing exactly `junction_count` partners* has neither problem.  It
+is decomposition-agnostic, has no label degeneracy, and is finer than the
+fragment granularity the oracle attributes to.  82.3% of junction atoms have
+count 1 and reduce to plain categorical; 17.2% have count 2.
+
+The softmax with k targets is deliberate: its optimum puts mass 1/k on each true
+partner, which ranks all k above every distractor.  That is exactly what the
+max-weight matching at decode consumes, and it is the property BCE does not
+provide, since BCE scores each candidate without reference to its competitors.
+
+Training is local and decoding is global -- Blossom projects the per-atom scores
+onto a consistent matching, the standard pattern.
 """
 
 import torch
-from torch_scatter import scatter_max
-
-_MAX_FRAG = 64  # rBRICS tops out at 45 fragments per molecule (RESULTS.md R2.1)
+from torch_geometric.utils import scatter, softmax
 
 
-def coarse_edge_groups(graph):
-    """Contiguous group id per candidate attachment pair.
+def atom_candidates(graph):
+    """Symmetrised per-atom view of the candidate list.
 
-    Candidates sharing a group belong to the same fragment pair in the same
-    molecule and compete for the one real bond between those fragments.
+    `ae_to_pred_index` stores each candidate once, as (i, j) with i < j, so
+    grouping by column 0 alone silently drops every atom that is always the
+    larger index.  Each candidate is therefore emitted twice, once per endpoint.
+
+    Returns (into_logits, group, is_true), all of length 2 * n_candidates.
     """
-    i, j = graph.ae_to_pred_index  # global atom indices (PyG offsets these)
-    fa, fb = graph.h_frag_batch[i], graph.h_frag_batch[j]  # per-molecule, not offset
-    lo, hi = torch.minimum(fa, fb), torch.maximum(fa, fb)
-    key = graph.batch[i] * _MAX_FRAG * _MAX_FRAG + lo * _MAX_FRAG + hi
-    _, group = torch.unique(key, return_inverse=True)
-    return group
-
-
-def check_one_hot(graph, group):
-    """Does every coarse edge carry exactly one true bond?
-
-    The categorical formulation is only valid if it does.  Returns counts of true
-    bonds per group so a violation is visible rather than silently averaged away.
-    """
-    from torch_geometric.utils import scatter
-
-    n_true = scatter(graph.ae_to_pred.long(), group, reduce="sum")
-    n_cand = scatter(torch.ones_like(group), group, reduce="sum")
-    return n_true, n_cand
-
-
-def attachment_loss(logits, graph, group):
-    """Cross-entropy of the true attachment against a softmax over each group."""
-    from torch_geometric.utils import softmax
-
-    p = softmax(logits, group)
+    i, j = graph.ae_to_pred_index
+    n = i.numel()
+    ar = torch.arange(n, device=i.device)
+    into_logits = torch.cat([ar, ar])
+    _, group = torch.unique(torch.cat([i, j]), return_inverse=True)
     true = graph.ae_to_pred.bool()
+    return into_logits, group, torch.cat([true, true])
+
+
+def attachment_loss(logits, graph):
+    """Cross-entropy of each atom's true partners against a softmax over its
+    candidates."""
+    into, group, true = atom_candidates(graph)
+    if into.numel() == 0:
+        return logits.sum() * 0.0
+    p = softmax(logits[into], group)
     return -torch.log(p[true].clamp_min(1e-12)).mean()
 
 
-def attachment_decode(logits, group):
-    """One bond per coarse edge: the arg-max candidate in each group."""
-    _, argmax = scatter_max(logits, group, dim=0)
-    chosen = torch.zeros_like(logits, dtype=torch.bool)
-    chosen[argmax[argmax < logits.numel()]] = True
-    return chosen
+def partner_counts(graph):
+    """True partners per atom, which must equal that atom's junction count."""
+    _, group, true = atom_candidates(graph)
+    return scatter(true.long(), group, reduce="sum")

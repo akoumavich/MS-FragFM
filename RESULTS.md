@@ -631,3 +631,65 @@ learns to keep within [-1,1] because that is what the transform normalised
 training latents to. Applying the same inverse to a standard normal models the
 t=0 initialisation, not what the decoder is ever handed. The prior arm is
 retained as a diagnostic and is no longer the basis of any claim.
+
+---
+
+## R11 — Blossom decode, and the granularity attachment is categorical at
+
+### The decode rule was wrong in R7 and R10
+
+FragFM's generation path does not threshold attachment scores. It expands each
+junction atom into one slot per open valence, runs Blossom max-weight matching
+over the slots, and contracts back
+(`genererate_utils.realize_single_fine_graph_dict`). E0-e used `pred > 0.5`, so
+R7 and R10 describe the scoring head rather than the model that ships. Matching
+depends only on the *ordering* of scores, a threshold on their absolute values,
+so the two can diverge sharply.
+
+Paired comparison, same 1,000 MassSpecGym test molecules, BRICS, same checkpoint:
+
+| z source | threshold | **Blossom** | gain |
+| --- | ---: | ---: | ---: |
+| encoded | 0.9500 | **0.9840** | +3.4 |
+| noised s=0.5 | 0.9080 | 0.9630 | +5.5 |
+| noised s=1.0 | 0.7310 | 0.8390 | +10.8 |
+| **shuffled** | 0.2040 | **0.2570** | +5.3 |
+| prior | 0.0660 | 0.2380 | +17.2 |
+
+Blossom helps everywhere and helps most where the scores are worst, exactly as
+the mechanism predicts — a global matching is robust to score shifts that destroy
+a fixed threshold.
+
+**It does not help enough.** Through the real decode, a wrong-but-valid latent
+still costs 73 points of exact reconstruction, 0.984 to 0.257. **R7 and R10's
+conclusion survives; their numbers do not.** The correct figure is 25.7%, not
+19.5%, and the correct ceiling factor for BRICS is **0.984**, not 0.949 — so the
+BRICS ceiling is 0.725 x 0.984 = **0.713**.
+
+### Attachment is categorical per atom, not per coarse edge
+
+| granularity | valid? | why |
+| --- | --- | --- |
+| per coarse edge | **no** | rBRICS cuts rings and a cut ring joins its fragments twice: 7.67% of rBRICS coarse edges carry two bonds, against 0.00% of BRICS ones |
+| per slot | yes, but degenerate | slots on the same atom are interchangeable, so the categorical is unidentifiable under relabelling |
+| **per atom, choose junction_count** | **yes** | by construction, in any decomposition, with no degeneracy |
+
+Junction counts (MassSpecGym, BRICS): 82.3% of junction atoms have count 1,
+17.2% count 2, 0.45% count 3 or more. So choose-one covers most atoms but not
+enough of them to treat choose-k as a special case.
+
+Candidate-set sizes per coarse edge: 21.2% have a single candidate and are free;
+mean 2.80. A uniform guess scores 0.50 per edge, which is the floor any learned
+head has to beat.
+
+### Design
+
+Per-atom softmax over its candidate partners, cross-entropy against its true
+ones, Blossom unchanged at decode. Local training, global decoding.
+
+The softmax with k targets is deliberate rather than a compromise: its optimum
+puts 1/k on each true partner, ranking all k above every distractor, which is
+precisely what max-weight matching consumes. BCE cannot express that, because it
+scores each candidate without reference to its competitors.
+
+No architecture change — the network already emits one logit per candidate.

@@ -4,6 +4,64 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-22 — Discrete attachment: the design, after two wrong turns that the data caught
+
+**My evaluation used the wrong decode rule.** FragFM's generation path never
+thresholds attachment scores — it expands junction atoms into slots, runs Blossom
+max-weight matching, and contracts back. E0-e used `pred > 0.5`, so R7 and R10
+measured the scoring head, not the model that ships. Matching depends on the
+*ordering* of scores and a threshold on their absolute values, so the two can
+diverge badly. I built the evaluation from FragFM's `eval_ae.py`, which
+thresholds because it is measuring the head in isolation — right for their
+purpose, wrong for mine.
+
+Paired on the same 1,000 molecules: Blossom lifts every arm, most where scores
+are worst (prior 0.066 -> 0.238, shuffled 0.204 -> 0.257, encoded 0.950 ->
+0.984). **It does not lift enough.** A wrong-but-valid latent still costs 73
+points, 0.984 -> 0.257. **R7 and R10's conclusion survives; their numbers do
+not** — 25.7%, not 19.5%. The BRICS ceiling factor is 0.984, so the BRICS
+ceiling is 0.725 x 0.984 = 0.713.
+
+**My first design was the wrong granularity, and the check killed it before
+training.** Per-coarse-edge categorical — "which atom pair joins fragments A and
+B" — is valid for BRICS (100.00% one bond per edge) and invalid for rBRICS
+(7.67% carry two). The cause is rBRICS cutting rings: breaking a ring takes two
+bonds, so the two fragments are joined twice. A formulation that works for one
+decomposition and not the other is the wrong formulation.
+
+**Per atom, choosing `junction_count` partners, is the right one.** Valid by
+construction in any decomposition, no label degeneracy (unlike per-slot, where
+slots on an atom are interchangeable), and finer than the fragment granularity
+the oracle attributes to. 82.3% of junction atoms have count 1, 17.2% count 2 —
+choose-k is common enough that it cannot be a special case.
+
+Softmax with k targets is deliberate: its optimum puts 1/k on each true partner,
+ranking all k above every distractor, which is exactly what max-weight matching
+consumes. BCE cannot express that because it scores each candidate without
+reference to its competitors. That competition is the whole content of the
+change; **the network is untouched**, since it already emits one logit per
+candidate.
+
+**A measurement bug in my own granularity check.** `ae_to_pred_index` stores each
+candidate once as (i, j) with i < j, so grouping by column 0 drops every atom
+that is always the larger index — it reported 23.9% of atoms having zero true
+partners, which is impossible for a junction atom. Symmetrised; true partners per
+atom now equals junction count, as it must.
+
+**Built:** `msfragfm/attachment.py` (per-atom choose-k loss),
+`msfragfm/blossom.py` (the real decode, reusable), `scripts/train_ae.py` (three
+arms), `scripts/check_attachment.py` (the granularity diagnostics, including the
+retired coarse-edge grouping, kept because it is the evidence that retired it).
+
+**Next: the three arms.** BCE+z is the fair retrained baseline; atom_ce+z asks
+whether competition alone helps; **atom_ce with z zeroed is the one that
+decides**. If it recovers atom_ce+z without the latent, attachment was
+determined by the coarse graph all along, z goes, and Method D needs no further
+work. If not, the choice has to become a variable of the flow rather than an
+output of the decoder.
+
+---
+
 ## 2026-09-19 — E0 complete. C1 is retired as a contribution; the attachment redesign is on
 
 Week 1's blocking measurements are done, and between them they reshape the plan.
