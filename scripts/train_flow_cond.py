@@ -18,6 +18,7 @@ import argparse
 import importlib.util
 import json
 import os
+import pickle
 import sys
 import time
 from pathlib import Path
@@ -81,12 +82,26 @@ def main():
                for f, d in ds.items()}
     print(f"{tag}: {len(ds['train']):,} training spectra")
 
-    ae = FragJunctionAE(read_yaml_as_easydict("save/ae_model/npgen/cfg.yaml"))
+    ae_cfg = read_yaml_as_easydict("save/ae_model/npgen/cfg.yaml")
+    ae = FragJunctionAE(ae_cfg)
     ae.load_state_dict(torch.load(
         args.ae or RESULTS / "ae_ft_brics.pt", map_location="cpu"))
     ae.cuda().eval()
     for p in ae.parameters():  # the latent target must not move under the flow
         p.requires_grad_(False)
+
+    # Both are set in train_flow.py's main block, which we do not run.
+    cfg.latent_z_dim = ae_cfg.latent_z_dim
+    cache = RESULTS / f"latent_transform_{stem}.pkl"
+    if cache.exists():
+        cfg.latent_transform_param = pickle.loads(cache.read_bytes())
+    else:
+        # One pass over the training spectra to bound the latent range; cached,
+        # because it depends only on the autoencoder and the structures.
+        cfg.latent_transform_param = ae.get_min_max_transform(loaders["train"])
+        cache.write_bytes(pickle.dumps(cfg.latent_transform_param))
+    print(f"latent range [{cfg.latent_transform_param['min'].min():.2f}, "
+          f"{cfg.latent_transform_param['max'].max():.2f}]")
 
     frag_embedder = FragToVect(cfg).cuda()
     coarse_gnn = CoarseGraphPropagate(cfg).cuda()
