@@ -15,16 +15,41 @@ from the same script means it cannot silently differ in anything else.
 """
 
 import argparse
+import copy
 import importlib.util
 import json
 import os
 import pickle
+import random
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
+
+
+def rng_state():
+    """Every source that steers a training step.
+
+    numpy is not optional here: the fragment bag is drawn with `np.random.choice`
+    (fragfm/dataset.py:423), so without it a resumed run sees a different bag
+    sequence and is not the run it is continuing.
+    """
+    return {
+        "torch": torch.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state_all(),
+        "numpy": np.random.get_state(),
+        "python": random.getstate(),
+    }
+
+
+def set_rng_state(s):
+    torch.set_rng_state(s["torch"])
+    torch.cuda.set_rng_state_all(s["cuda"])
+    np.random.set_state(s["numpy"])
+    random.setstate(s["python"])
 
 from msfragfm import tracking
 from msfragfm.paths import RESULTS
@@ -75,7 +100,10 @@ def main():
 
     cfg = read_yaml_as_easydict(args.arch)
     cfg.use_spectrum_cond = args.cond == "spectrum"
-    cfg.use_ema = False  # process_single_epoch reaches for module-level EMA globals
+    cfg.use_ema = True
+    # Deliberately False even when resuming.  In process_single_epoch, is_resume
+    # short-circuits warmup entirely and jumps to full lr; we want warmup to
+    # continue from the restored n_iter_done instead.
     cfg.is_resume = False
     cfg.n_iter_done = 0
     cfg.lr = args.lr
@@ -117,6 +145,21 @@ def main():
     cond_model = (SpectrumEncoder(out_dim=cfg.embd_h_dim).cuda()
                   if cfg.use_spectrum_cond else None)
 
+    # FragFM's generator loads EMA weights, so EMA is not optional if the result
+    # is ever to be sampled from.  process_single_epoch updates module-level
+    # globals, which we supply here rather than let it fail on.
+    emas = {"frag_embedder": copy.deepcopy(frag_embedder),
+            "coarse_gnn": copy.deepcopy(coarse_gnn)}
+    if cond_model is not None:
+        emas["cond_model"] = copy.deepcopy(cond_model)
+    for m in emas.values():
+        m.eval()
+        for p in m.parameters():
+            p.requires_grad_(False)
+    tf.ema_frag_embedder = emas["frag_embedder"]
+    tf.ema_coarse_gnn = emas["coarse_gnn"]
+    tf.ema_cond_model = emas.get("cond_model")
+
     params = list(frag_embedder.parameters()) + list(coarse_gnn.parameters())
     if cond_model is not None:
         params += list(cond_model.parameters())
@@ -145,23 +188,55 @@ def main():
     history, start_epoch = [], 1
     if args.resume == "auto" and ckpt_path.exists():
         ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        if "optimizer" in ck:
+        if "optimizer" not in ck:
+            print(f"{ckpt_path.name} predates resume support; starting over")
+        else:
             frag_embedder.load_state_dict(ck["frag_embedder"])
             coarse_gnn.load_state_dict(ck["coarse_gnn"])
             if cond_model is not None and ck.get("cond_model"):
                 cond_model.load_state_dict(ck["cond_model"])
+            for k, m in emas.items():
+                m.load_state_dict(ck["ema"][k])
             opt.load_state_dict(ck["optimizer"])
             cfg.n_iter_done = ck["n_iter_done"]
             history = ck.get("history", [])
             start_epoch = ck["epoch"] + 1
+            set_rng_state(ck["rng"])
+            # A resume that silently changes the schedule is worse than a crash.
+            drift = {k: (v, vars(args)[k]) for k, v in ck["args"].items()
+                     if k in vars(args) and vars(args)[k] != v and k != "resume"}
+            if drift:
+                print(f"[warn] args changed since the checkpoint: {drift}")
             print(f"resumed from epoch {ck['epoch']} "
-                  f"({cfg.n_iter_done:,} iters done)")
-        else:
-            print(f"{ckpt_path.name} predates resume support; starting over")
+                  f"({cfg.n_iter_done:,} iters done, lr "
+                  f"{opt.param_groups[0]['lr']:.2e})")
     if start_epoch > args.epochs:
         print("already complete")
         tracking.finish(run)
         return
+
+    if start_epoch == 1:
+        # Step 0: the untrained model's losses, over a short pass with no
+        # optimizer, so the wandb curve starts where training actually started.
+        probe = DataLoader(
+            Subset(ds["train"], range(min(20 * args.bs, len(ds["train"])))),
+            batch_size=args.bs, shuffle=False, num_workers=8,
+            collate_fn=collate_frag_fm_dataset)
+        r0 = tf.process_single_epoch(
+            cfg, ae, frag_embedder, coarse_gnn, probe, scheds,
+            frag_occurance_source="train", optimizer=None, cond_model=cond_model)
+        print(f"  ep   0  loss {r0['loss']:.4f}  frag {r0['fragment_type_loss']:.4f}"
+              f"  edge {r0['fragment_edge_loss']:.4f}  z {r0['latent_loss']:.4f}"
+              f"  (untrained)", flush=True)
+        tracking.log(run, {
+            "epoch": 0,
+            "loss/total": r0["loss"],
+            "loss/fragment_type": r0["fragment_type_loss"],
+            "loss/coarse_edge": r0["fragment_edge_loss"],
+            "loss/latent_z": r0["latent_loss"],
+            "lr": 0.0,
+            "iters_done": 0,
+        }, step=0)
 
     t0 = time.perf_counter()
     for epoch in range(start_epoch, args.epochs + 1):
@@ -189,9 +264,16 @@ def main():
                     "frag_embedder": frag_embedder.state_dict(),
                     "coarse_gnn": coarse_gnn.state_dict(),
                     "cond_model": cond_model.state_dict() if cond_model else None,
+                    "ema": {k: m.state_dict() for k, m in emas.items()},
                     "optimizer": opt.state_dict(),
                     "n_iter_done": cfg.n_iter_done,
+                    "rng": rng_state(),
                     "history": history,
+                    "args": vars(args),
+                    # The frozen autoencoder defines the latent the flow is
+                    # regressing to; a resume against a different one is silently
+                    # a different problem.
+                    "ae": str(args.ae or RESULTS / "ae_ft_brics.pt"),
                     "cfg": dict(cfg)}, tmp)
         os.replace(tmp, ckpt_path)
 

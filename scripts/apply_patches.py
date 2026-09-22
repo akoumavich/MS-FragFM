@@ -174,6 +174,23 @@ PATCHES = [
             optimizer.step()""",
     ),
     dict(
+        name="trainflow-cond-ema",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "EMA the conditioning model along with the rest.  FragFM's generator "
+            "loads EMA weights (`frag_embedder_ema_*.pt`), so a spectrum encoder "
+            "left out of the average would be mismatched with the flow it was "
+            "trained beside."
+        ),
+        marker="ema_cond_model",
+        old="""                update_ema(frag_embedder, ema_frag_embedder)
+                update_ema(coarse_gnn, ema_coarse_gnn)""",
+        new="""                update_ema(frag_embedder, ema_frag_embedder)
+                update_ema(coarse_gnn, ema_coarse_gnn)
+                if cond_model is not None:
+                    update_ema(cond_model, ema_cond_model)""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(

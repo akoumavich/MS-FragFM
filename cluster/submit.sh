@@ -23,6 +23,7 @@ MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' runai submit "$NAME" \
   -e HOME=/scratch/home/akoum -e USER=akoum -e LOGNAME=akoum \
   -e TORCHINDUCTOR_CACHE_DIR=/scratch/home/akoum/.cache/torchinductor \
   -e COND="${COND:-}" -e EPOCHS="${EPOCHS:-}" -e BS="${BS:-}" -e LR="${LR:-}" \
+  -e RESUME="${RESUME:-auto}" \
   -e EXP_NAME="${EXP_NAME:-$NAME}" -e WANDB_PROJECT="${WANDB_PROJECT:-MS-FragFM}" \
   -e WANDB_DIR=/scratch/home/akoum/.cache/wandb \
   -e MSFRAGFM_DATA=/scratch/home/akoum/data/msfragfm \
