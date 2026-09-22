@@ -101,3 +101,64 @@ def collate_spectra(items):
         out[k] = torch.stack([x[k] for x in items])
     out["samples"] = [x["sample"] for x in items]
     return out
+
+
+# --- conditioning the flow -------------------------------------------------
+#
+# The spectrum rides on the coarse graph rather than in a parallel batch, so it
+# survives PyG collation and reaches `process_single_epoch` without changing its
+# signature beyond one optional model.  Peaks are padded to a fixed width so PyG
+# concatenates [1, n_peaks] per graph into [bs, n_peaks].
+
+COND_FIELDS = ("mz", "intensity", "peak_mask", "formula", "precursor_mz",
+               "collision_energy", "adduct", "instrument")
+
+
+def cond_inputs(coarse_graph):
+    """Pull the spectrum fields back off a batched coarse graph."""
+    return {k: getattr(coarse_graph, k) for k in COND_FIELDS}
+
+
+def make_spectrum_dataset(lmdb_fn, frag_lmdb_fn, frag_smi_to_idx_fn, fold,
+                          n_peaks=60):
+    """FragFMDataset indexed by spectrum instead of by structure.
+
+    One structure carries many spectra, so `keys` is rewritten to one entry per
+    spectrum; the parent class then loads the right molecule for each.
+    """
+    from fragfm.dataset import FragFMDataset
+
+    class SpectrumConditioned(FragFMDataset):
+        def __init__(self):
+            super().__init__(lmdb_fn, frag_lmdb_fn, frag_smi_to_idx_fn,
+                             data_split=FOLD_TO_PREFIX[fold], debug=False)
+            spec = MassSpecGymSpectra(self.env, fold=fold, n_peaks=n_peaks)
+            smi_to_key = {}
+            with self.env.begin() as txn:
+                for k in self.keys:
+                    smi_to_key[pickle.loads(txn.get(k))["smi"]] = k
+            self.spec = spec
+            self.keys = [smi_to_key[s] for s in spec.df.smiles]
+            self.length = len(self.keys)
+            self.n_peaks = n_peaks
+
+        def __len__(self):
+            return self.length
+
+        def __getitem__(self, i):
+            graph, coarse = super().__getitem__(i)
+            s = self.spec[i]
+            k = s["mz"].numel()
+            mz = torch.zeros(1, self.n_peaks)
+            inten = torch.zeros(1, self.n_peaks)
+            mask = torch.zeros(1, self.n_peaks, dtype=torch.bool)
+            mz[0, :k], inten[0, :k], mask[0, :k] = s["mz"], s["intensity"], True
+            coarse.mz, coarse.intensity, coarse.peak_mask = mz, inten, mask
+            coarse.formula = s["formula"].unsqueeze(0)
+            coarse.precursor_mz = s["precursor_mz"].view(1)
+            coarse.collision_energy = s["collision_energy"].view(1)
+            coarse.adduct = s["adduct"].view(1)
+            coarse.instrument = s["instrument"].view(1)
+            return graph, coarse
+
+    return SpectrumConditioned()

@@ -110,6 +110,70 @@ PATCHES = [
         g_embd = torch.cat(g_embd_parts, dim=1)""",
     ),
     dict(
+        name="trainflow-cond-signature",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "Let process_single_epoch take a conditioning model.  We import and "
+            "reuse this function rather than transcribe it: the corruption logic "
+            "(antithetic time sampling, per-prior masking schedules, the "
+            "fragment-bag mask) is subtle, and a transcription error would not "
+            "raise, it would just train worse."
+        ),
+        marker="cond_model=None,",
+        old="""    frag_occurance_source="train",
+    optimizer=None,
+):""",
+        new="""    frag_occurance_source="train",
+    optimizer=None,
+    cond_model=None,
+):""",
+    ),
+    dict(
+        name="trainflow-cond-forward",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why="Second part: encode the spectrum riding on the coarse graph and pass it in.",
+        marker="cond_inputs(coarse_graph)",
+        old="""        pred_h_embd, pred_e_logit, pred_z = coarse_gnn(
+            ht_onehot,
+            coarse_graph.full_e_index,
+            et_onehot,
+            zt,
+            coarse_graph.batch,
+            model_t,
+            frag_zs,
+            h_valency,
+        )""",
+        new="""        cond = None
+        if cond_model is not None:
+            from msfragfm.spectra_data import cond_inputs
+
+            cond = cond_model(cond_inputs(coarse_graph))
+
+        pred_h_embd, pred_e_logit, pred_z = coarse_gnn(
+            ht_onehot,
+            coarse_graph.full_e_index,
+            et_onehot,
+            zt,
+            coarse_graph.batch,
+            model_t,
+            frag_zs,
+            h_valency,
+            cond=cond,
+        )""",
+    ),
+    dict(
+        name="trainflow-cond-clip",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why="Third part: clip the conditioning model's gradients with the rest.",
+        marker="clip_grad_norm_(cond_model.parameters()",
+        old="""            torch.nn.utils.clip_grad_norm_(frag_embedder.parameters(), cfg.grad_clip)
+            optimizer.step()""",
+        new="""            torch.nn.utils.clip_grad_norm_(frag_embedder.parameters(), cfg.grad_clip)
+            if cond_model is not None:
+                torch.nn.utils.clip_grad_norm_(cond_model.parameters(), cfg.grad_clip)
+            optimizer.step()""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(
