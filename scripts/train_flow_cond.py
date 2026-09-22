@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, RandomSampler
 
 
 def rng_state():
@@ -218,9 +218,14 @@ def main():
     if start_epoch == 1:
         # Step 0: the untrained model's losses, over a short pass with no
         # optimizer, so the wandb curve starts where training actually started.
+        # A sampler, not a Subset: process_single_epoch reaches through
+        # `data_loader.dataset` for the fragment bag, and Subset does not proxy.
+        # Random rather than a prefix, since the folds are not stored in a
+        # representative order (RESULTS.md R12).
         probe = DataLoader(
-            Subset(ds["train"], range(min(20 * args.bs, len(ds["train"])))),
-            batch_size=args.bs, shuffle=False, num_workers=8,
+            ds["train"], batch_size=args.bs, num_workers=8,
+            sampler=RandomSampler(ds["train"], replacement=False,
+                                  num_samples=min(20 * args.bs, len(ds["train"]))),
             collate_fn=collate_frag_fm_dataset)
         r0 = tf.process_single_epoch(
             cfg, ae, frag_embedder, coarse_gnn, probe, scheds,

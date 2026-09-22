@@ -28,7 +28,6 @@ def init(default_name, config=None, project="MS-FragFM"):
             id=hashlib.md5(name.encode()).hexdigest()[:16],
             resume="allow",
             config=config,
-            reinit=True,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"[wandb] disabled: {type(exc).__name__}: {exc}")
