@@ -4,6 +4,65 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-22 — The three arms ran. Both of my hypotheses were wrong; the design got simpler
+
+Results in RESULTS.md R12. Full MassSpecGym BRICS test fold, Blossom decode:
+BCE+z **0.7845**, atom_ce+z 0.7636, atom_ce with z zeroed 0.4797, and the
+released NPGen checkpoint zero-shot **0.9491**.
+
+**Competition does not help, and the reason is instructive.** Per-atom
+choose-k lands 2.1 points *below* BCE. Max-weight matching compares candidate
+scores **across** atoms in one optimisation, and a per-atom softmax normalises
+each atom separately — destroying exactly the comparability Blossom needs. BCE
+calibrates each logit against an absolute probability, which is directly usable
+as a matching weight. My argument was right about ranking within an atom and
+wrong about what the decode consumes. The objective itself worked: atom_ce
+plateaus at 0.199 against its 0.119 irreducible floor. It learned what I asked
+for; I asked for the wrong thing.
+
+**Training from scratch on MassSpecGym is a mistake.** Every arm is far below the
+released checkpoint used zero-shot — 0.78 against 0.95. It saw 658,566 COCONUT
+molecules; our train fold is 25,023. BCE's training loss reaches 0.0056 with test
+at 0.78, which is overfitting. **Fine-tune, do not retrain** — cheaper and
+better, and doing it for both decompositions also settles rBRICS.
+
+**The architecture question is answered, and the answer is in between.** Trained
+without z, the model reaches 0.4797 against 0.7636 with it. So ~63% of the
+achievable accuracy comes from the coarse graph alone and ~28 points is
+information z genuinely carries. Attachment cannot be dropped.
+
+But it is less dire than R11 implied. The shuffled-latent gap was 73 points
+because that decoder was *trained with z available* and leaned on it. Trained
+without, the model recovers most of the way by itself. The honest measure of
+what z uniquely contributes is the arm2-minus-arm3 gap, ~28 points, not 73. I
+should have seen that the shuffled test necessarily overstates the case against a
+variable the model was trained to depend on.
+
+**A sampling bias in every `--limit 1K` number I have reported.** The test fold
+is stored in an order where the first ~1,024 molecules score ~11 points above the
+fold average — +11.8, +12.1, +9.7 across the three arms, so it is the data, not
+noise. Paired comparisons within one subset (threshold vs Blossom, R11) are
+unaffected; absolute levels from 1K runs are optimistic. The `--limit 10K` runs
+covered the whole 3,160-molecule fold and stand. Evaluation now shuffles once
+with a fixed seed.
+
+**The design got smaller, and the failed experiment is what found it.** Credit
+assignment does not need a new training loss — that is what arm 2 tried and what
+the matching decode rejects. It needs attachment to be a **sampled** variable
+with per-atom log-probabilities, and those two things are separable:
+
+- train with BCE, which the decode rule prefers;
+- at generation, sample each atom's partners from a temperature-controlled
+  softmax over the BCE logits, then Blossom-project as now;
+- the softmax supplies per-atom log-probs for GRPO, and the training objective is
+  untouched, so no accuracy is paid for the credit signal.
+
+**Next:** fine-tune the released checkpoint on MassSpecGym for both BRICS and
+rBRICS. That gives the real second ceiling factor, settles the decomposition, and
+supplies the base the sampled-attachment head sits on.
+
+---
+
 ## 2026-09-22 — Discrete attachment: the design, after two wrong turns that the data caught
 
 **My evaluation used the wrong decode rule.** FragFM's generation path never

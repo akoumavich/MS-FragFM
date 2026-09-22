@@ -22,6 +22,7 @@ head for reasons the pipeline never sees.
 import argparse
 import copy
 import json
+import random
 import os
 import sys
 import time
@@ -90,6 +91,9 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--eval-batches", type=int, default=4,
                     help="Blossom is CPU-bound; keep periodic eval short")
+    ap.add_argument("--init", default=None,
+                    help="checkpoint to fine-tune from; training from scratch on "
+                         "25k molecules underperforms the released 658k-molecule one")
     ap.add_argument("--tag", default=None)
     args = ap.parse_args()
     tag = args.tag or f"{Path(args.data).stem}_{args.loss}_z{args.z}"
@@ -106,8 +110,13 @@ def main():
     sets = {"train": FragJunctionAEDataset(args.data, data_split="train", debug=False)}
     sets["test"] = copy.copy(sets["train"])
     with sets["train"].env.begin() as txn:
-        sets["test"].keys = [k for k, _ in txn.cursor() if "test" in k.decode()]
-    sets["test"].length = len(sets["test"].keys)
+        keys = [k for k, _ in txn.cursor() if "test" in k.decode()]
+    # Shuffle once: the fold is stored in an order where the first ~1000
+    # molecules score ~11 points above the fold average, so an unshuffled prefix
+    # makes the periodic eval systematically optimistic.
+    random.Random(0).shuffle(keys)
+    sets["test"].keys = keys
+    sets["test"].length = len(keys)
     loaders = {
         s: DataLoader(d, batch_size=args.bs, shuffle=(s == "train"),
                       collate_fn=collate_frag_junction_ae_dataset,
@@ -116,7 +125,10 @@ def main():
     }
     print(f"{tag}: train {len(sets['train']):,} · test {len(sets['test']):,}")
 
-    model = FragJunctionAE(cfg).cuda()
+    model = FragJunctionAE(cfg)
+    if args.init:
+        print(model.load_state_dict(torch.load(args.init, map_location="cpu")))
+    model = model.cuda()
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr,
                             weight_decay=cfg.weight_decay)
 

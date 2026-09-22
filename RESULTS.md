@@ -693,3 +693,87 @@ precisely what max-weight matching consumes. BCE cannot express that, because it
 scores each candidate without reference to its competitors.
 
 No architecture change — the network already emits one logit per candidate.
+
+---
+
+## R12 — The three arms. Two hypotheses of mine fail, one question is answered
+
+`scripts/train_ae.py` @ `2242a6f` · MassSpecGym BRICS · trained from scratch,
+25,023 molecules, 200 epochs (~27 min each on one A100) · Blossom decode
+
+| arm | loss | z | full test fold (3,160) |
+| --- | --- | --- | ---: |
+| 1 | BCE (FragFM's) | encoded | **0.7845** |
+| 2 | per-atom choose-k | encoded | 0.7636 |
+| 3 | per-atom choose-k | **zeroed** | 0.4797 |
+| ref | BCE | encoded | **0.9491** — FragFM's released NPGen checkpoint, zero-shot |
+
+### Hypothesis 1 failed: making candidates compete does not help
+
+Arm 2 lands 2.1 points *below* arm 1. The competition argument was right about
+ranking within an atom and wrong about what the decode consumes.
+
+**Max-weight matching needs a globally comparable weight matrix.** Blossom
+compares candidate scores across different atoms in one optimisation. A per-atom
+softmax normalises each atom's scores separately, which is exactly the
+comparability it destroys. BCE calibrates every logit against an absolute
+probability, so its logits are directly usable as matching weights — it is
+better suited to this decode rule, not worse.
+
+The training losses show the objective itself worked: arm 2 plateaus at 0.199
+against an irreducible 0.172 x log 2 = 0.119 floor from the 17.2% of atoms with
+two true partners. It learned what it was asked to. It was asked for the wrong
+thing.
+
+### Hypothesis 2 failed: training from scratch on MassSpecGym is a mistake
+
+Every arm is far below the **released NPGen checkpoint used zero-shot** — 0.7845
+against 0.9491. That checkpoint saw 658,566 COCONUT molecules; MassSpecGym's
+train fold is 25,023, a 26-fold difference. Arm 1's training loss reaches 0.0056
+while its test accuracy sits at 0.78, which is overfitting, not underfitting.
+
+**Fine-tune the released checkpoint; do not retrain.** This is cheaper as well as
+better, and it should be done for both decompositions, which also settles the
+rBRICS question.
+
+### The architecture question is answered, and the answer is in between
+
+Arm 3 reaches **0.4797 without z**, against 0.7636 with it, in a model *trained*
+to cope without it.
+
+So roughly 63% of the achievable accuracy is reachable from the coarse fragment
+graph alone, and the remaining ~28 points is information z genuinely carries.
+Attachment cannot simply be dropped.
+
+But it is less dire than R11 implied. The shuffled-latent test gave 0.257 against
+0.984 — a 73-point gap — because that decoder was *trained with z available* and
+leaned on it. Trained without, the model recovers most of the way on its own. The
+honest figure for what z uniquely contributes is the arm-2-minus-arm-3 gap, ~28
+points, not 73.
+
+### A sampling bias in every `--limit 1K` number reported so far
+
+The test fold is stored in an order where the first ~1,024 molecules score
+consistently ~11 points above the fold average — +11.8, +12.1 and +9.7 across the
+three arms. `--limit 1K` took a prefix, not a sample.
+
+Paired comparisons within one subset (threshold vs Blossom in R11) are unaffected
+since both arms saw the same molecules. Absolute levels from 1K runs are
+optimistic and should be read as such; the `--limit 10K` runs covered the whole
+3,160-molecule fold and are fine. Evaluation now shuffles the fold once with a
+fixed seed.
+
+### What this changes about the design
+
+The credit-assignment fix does not need a new training loss, which is what arm 2
+tried and what the matching decode rejects. It needs attachment to be a
+**sampled** variable with per-atom log-probabilities.
+
+Those are separable. Train with BCE, which the decode rule prefers. At generation
+time, sample each atom's partners from a temperature-controlled softmax over the
+BCE logits, then project onto a valid matching with Blossom exactly as now. The
+per-atom softmax supplies log-probabilities for GRPO, and the training objective
+is untouched, so nothing is paid in accuracy for the credit signal.
+
+That is a smaller change than the redesign this experiment set out to test, and
+it is the experiment that found it.
