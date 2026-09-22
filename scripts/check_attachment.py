@@ -41,9 +41,21 @@ def main():
     loader = DataLoader(ds, batch_size=args.bs, shuffle=False,
                         collate_fn=collate_frag_junction_ae_dataset, num_workers=8)
 
-    true_counts, cand_counts = Counter(), Counter()
+    true_counts, cand_counts, jc_counts = Counter(), Counter(), Counter()
+    atom_true, atom_cand = Counter(), Counter()
     n_groups = n_mols = 0
     for graph in loader:
+        jc = graph.h_junction_count
+        jc_counts.update(jc[jc != 0].tolist())
+        # Per-source-atom grouping: an atom with junction count k needs exactly k
+        # partners, so "pick one" only generalises if k is almost always 1.
+        src = graph.ae_to_pred_index[0]
+        if src.numel():
+            _, agrp = torch.unique(src, return_inverse=True)
+            from torch_geometric.utils import scatter
+            atom_true.update(scatter(graph.ae_to_pred.long(), agrp, reduce="sum").tolist())
+            atom_cand.update(scatter(torch.ones_like(agrp), agrp, reduce="sum").tolist())
+
         group = coarse_edge_groups(graph)
         if group.numel() == 0:
             n_mols += int(graph.batch.max()) + 1
@@ -78,6 +90,21 @@ def main():
           f"mean {mean_c:.2f} candidates")
     print("Chance accuracy of a uniform guess per edge: "
           f"{sum(v / k for k, v in cand_counts.items()) / tot:.4f}")
+
+    # Slot-level view: a junction atom with count k occupies k slots and takes k
+    # partners.  Slots always take exactly one, whatever the decomposition, so
+    # they are the granularity that is decomposition-agnostic -- but the candidate
+    # list is atom pairs, so k > 1 needs a choose-k head rather than choose-one.
+    jt = sum(jc_counts.values())
+    print("\njunction count per junction atom:")
+    for k in sorted(jc_counts):
+        print(f"  {k}: {jc_counts[k]:>9,}  ({jc_counts[k] / jt:.4f})")
+
+    at = sum(atom_true.values())
+    print("\ntrue partners per source atom:")
+    for k in sorted(atom_true):
+        print(f"  {k}: {atom_true[k]:>9,}  ({atom_true[k] / at:.4f})")
+    print(f"\nchoose-one per atom is exact for {atom_true[1] / at:.4f} of atoms")
 
 
 if __name__ == "__main__":
