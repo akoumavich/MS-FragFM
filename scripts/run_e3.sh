@@ -18,4 +18,5 @@ python scripts/train_flow_cond.py \
   --epochs "${EPOCHS:-30}" \
   --bs "${BS:-256}" \
   --lr "${LR:-2e-4}" \
-  --tag "flow_${COND:-spectrum}" \n  --resume "${RESUME:-auto}"
+  --tag "flow_${COND:-spectrum}" \
+  --resume "${RESUME:-auto}"
