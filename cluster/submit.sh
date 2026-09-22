@@ -22,6 +22,7 @@ MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' runai submit "$NAME" \
   --run-as-uid 307371 --run-as-gid 30204 --supplemental-groups 11131,76208,77864 \
   -e HOME=/scratch/home/akoum -e USER=akoum -e LOGNAME=akoum \
   -e TORCHINDUCTOR_CACHE_DIR=/scratch/home/akoum/.cache/torchinductor \
+  -e COND="${COND:-}" -e EPOCHS="${EPOCHS:-}" -e BS="${BS:-}" -e LR="${LR:-}" \
   -e MSFRAGFM_DATA=/scratch/home/akoum/data/msfragfm \
   --node-pools "$NODE_POOL" \
   -- bash -lc "cd /scratch/home/akoum/repos/MS-FragFM && source .venv/bin/activate && bash $SCRIPT"
