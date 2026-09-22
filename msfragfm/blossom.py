@@ -49,7 +49,7 @@ def blossom_select(logits, graph):
         # One slot per open valence, then a perfect matching over slots.
         dup = graph.h_junction_count[junc].long()
         exp = score.repeat_interleave(dup, 0).repeat_interleave(dup, 1)
-        mask = _match(exp)
+        mask = _match(exp).to(device)  # networkx works on CPU; come back
         # Contract: slot pairs summed back onto atom pairs, so a fragment pair
         # joined twice (a cut ring) reads as 2.
         rows = torch.stack([r.sum(0) for r in torch.split(mask, dup.tolist(), 0)])
