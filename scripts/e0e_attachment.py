@@ -41,6 +41,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch_geometric.utils import scatter
 
+from msfragfm.blossom import blossom_select
 from msfragfm.paths import RESULTS
 
 FRAGFM = Path(__file__).resolve().parents[2] / "FragFM"
@@ -176,6 +177,8 @@ def main():
     ap.add_argument("--tag", default="npgen")
     ap.add_argument("--multiplicity", type=int, default=0, help="K z-draws per molecule")
     ap.add_argument("--mult-n", type=int, default=512)
+    ap.add_argument("--decode", default="threshold", choices=["threshold", "blossom"],
+                    help="blossom is what the generation path actually uses")
     args = ap.parse_args()
 
     sys.path.insert(0, str(FRAGFM))
@@ -222,7 +225,8 @@ def main():
     print(f"{'z source':<14} {'edge acc':>9} {'graph acc':>10}")
     with torch.no_grad():
         for mode, sigma in arms:
-            r = evaluate(model, loader, mode, transform, sigma or 0.0, seed=0)
+            r = evaluate(model, loader, mode, transform, sigma or 0.0, seed=0,
+                         decode=args.decode)
             label = mode + (f" s={sigma}" if sigma else "")
             rows.append({"z_source": label, **r})
             print(f"{label:<14} {r['edge_acc']:>9.4f} {r['graph_acc']:>10.4f}")
