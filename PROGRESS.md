@@ -4,6 +4,63 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-22 — E9 added: the objective is an arm. Collapse instruments built.
+
+Read both repos rather than working from the abstracts, and the distinction
+between the two methods is sharper than "alternatives to GRPO".
+
+**DMPO** (`DMPO/DMPO/dmpo_trainer.py`, arXiv 2510.08233) builds a group-level
+target proportional to reward and fits it by approximate forward-KL. The whole
+mechanism is one line: GRPO's advantages are signed, `(r - mu)/sigma`, so a
+**correct solution scoring below the group mean is actively pushed down**. That
+is the RLVR literature's "indifference to how mass is distributed among correct
+solutions" in concrete form. DMPO's weights are a softmax over the group, all
+positive, so it allocates mass among correct solutions without suppressing any.
+Cheapest possible retrofit: it consumes exactly the group GRPO already samples.
+Its likelihood-ratio term is optional for us -- dropping it leaves a pure reward
+softmax needing no trajectory likelihood at all, which matters because ours is
+intractable.
+
+**c-DTM** (`dtm/dtm/lightning_module.py`, arXiv 2604.18739) is built for this
+model class. Method D concedes that the marginal probability of a generated graph
+needs a sum over every path reaching it, and answers with a high-variance
+surrogate. DTM removes the surrogate instead of taming it: likelihood-free
+matching of local unmasking posteriors under progressive reward tilting. Our node
+prior is `mask`, so this is our setting with fragment slots in place of tokens.
+
+**The finding that changes the thesis rather than the recipe.** c-DTM's target is
+per-variable, and the reward enters as a factor on the realised value at each
+variable *independently*. So a per-fragment oracle score is the objective's own
+form. Under GRPO the same idea has to be grafted on as `A_i + kappa(S_v - S_bar)`
+with kappa trading global against local. **Under c-DTM there is no kappa.**
+
+C2 restated accordingly: structured credit assignment *plus distribution
+matching*, on a representation where both are natural. The fragment level is what
+lets the oracle's per-fragment scores land without aggregation; c-DTM is what
+lets them land without a mixing coefficient. Stronger and more coherent than
+structured credit assignment alone, and it answers the reviewer who knows this
+literature, for whom "we used KL" is not an answer.
+
+**Built** (testable now, before GRPO exists, because these are properties of the
+loss rather than of the model):
+
+- `msfragfm/objectives.py` -- all three arms side by side so swapping is a config
+  change: `grpo`, `dmpo`, `c_dtm` plus `TiltSchedule`.
+- `msfragfm/diversity.py` -- E8 instruments: joint top-1/top-10, unique valid
+  molecules per spectrum, mean pairwise Tanimoto within group, policy entropy,
+  fragment-usage entropy and effective vocabulary, and the across/within ratio.
+  Fingerprint stated explicitly (Morgan, radius 2, 2048 bits) since the v1.5
+  audit flags that these diverge across papers.
+- `scripts/check_objectives.py` -- verifies the sign asymmetry between GRPO and
+  DMPO, that a per-fragment reward reaches only its own variable under c-DTM,
+  that no gradient leaks to already-revealed variables, and that the diversity
+  metrics separate a collapsed group from a diverse one where top-k cannot.
+
+The last of those is the point of the diversity instruments in miniature: both
+test groups contain the truth, so top-k alone scores them identically.
+
+---
+
 ## 2026-09-22 — E8 added: mode collapse under GRPO, and a correction to Method D
 
 Checked the literature rather than assuming. Mode collapse under policy-gradient
