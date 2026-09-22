@@ -777,3 +777,62 @@ is untouched, so nothing is paid in accuracy for the credit signal.
 
 That is a smaller change than the redesign this experiment set out to test, and
 it is the experiment that found it.
+
+---
+
+## R13 — Fine-tuned autoencoders. BRICS wins, and the ceiling is ~0.71
+
+`scripts/train_ae.py --init save/ae_model/npgen/model_best.pt` · 60 epochs
+(~9 min each) · full MassSpecGym test fold, Blossom decode
+
+| BRICS autoencoder | exact reconstruction |
+| --- | ---: |
+| trained from scratch on MassSpecGym (R12) | 0.7845 |
+| released NPGen checkpoint, zero-shot | 0.9491 |
+| **NPGen checkpoint fine-tuned on MassSpecGym** | **0.9794** |
+
+Fine-tuning gains 3.0 points over zero-shot and 19.5 over scratch, in a third of
+the epochs. R12's conclusion holds emphatically: on 25k molecules, initialisation
+matters more than anything else available.
+
+### The decomposition decision, with both factors measured
+
+| | pool coverage | reconstruction | **ceiling** |
+| --- | ---: | ---: | ---: |
+| **BRICS** | 0.725 | **0.9794** | **0.7101** |
+| rBRICS | **0.823** | 0.8389 | 0.6904 |
+
+**BRICS, by 2.0 points.** R9 set the criterion in advance: rBRICS needed
+reconstruction above 0.8628 to justify its coverage advantage. It reached 0.8389.
+
+This is the second reversal of this decision and the first time it has been made
+on measurements rather than estimates:
+
+- **E0-a chose BRICS** on edge-slot compression alone, with no coverage data.
+- **E0-c reversed to rBRICS** on pool coverage, with no reconstruction data.
+- **R13 returns to BRICS** with both factors measured.
+
+Each reversal followed a number that did not exist before it, which is the
+process working. The cost was two days.
+
+rBRICS reconstructs worse for reasons that follow from what it is: 8.6 fragments
+per molecule against 7.1, more junction atoms each, and cut rings that join a
+fragment pair twice. Its coverage advantage is real and is simply not large
+enough to pay for that.
+
+BRICS also wins on edge-slot compression (14.4x vs 9.0x), so the only axis rBRICS
+led on was coverage.
+
+### The ceiling
+
+> **exact top-1 <= 0.71** for this representation, at a 200k-molecule fragment
+> pool, before the generator, the oracle or the RL are considered at all.
+
+Both factors are floors. Coverage was still climbing steeply at 200k with 4M
+corpus molecules available (R5), and reconstruction is a fine-tune of a checkpoint
+trained on someone else's chemistry.
+
+Against a field at ~18% top-1 this is comfortable headroom — roughly 4x — which
+is the answer to the question R3 raised and mis-framed. It is worth reporting in
+the paper regardless: no published de novo method states the ceiling its own
+representation imposes, and ours is now measured rather than assumed.

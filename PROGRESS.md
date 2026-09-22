@@ -4,6 +4,55 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-22 — Decomposition settled: BRICS. Ceiling measured at 0.71
+
+Fine-tuned the released NPGen autoencoder on MassSpecGym for both
+decompositions, 60 epochs each (~9 min). Full test fold, Blossom decode:
+**BRICS 0.9794, rBRICS 0.8389**. RESULTS.md R13.
+
+Fine-tuning gains 3.0 points over the zero-shot checkpoint and 19.5 over
+training from scratch, in a third of the epochs. On 25k molecules,
+initialisation dominates everything else available.
+
+**Decomposition: BRICS.** Both factors measured for the first time:
+
+| | coverage | reconstruction | ceiling |
+| --- | ---: | ---: | ---: |
+| BRICS | 0.725 | 0.9794 | **0.7101** |
+| rBRICS | 0.823 | 0.8389 | 0.6904 |
+
+R9 fixed the criterion in advance: rBRICS needed reconstruction above 0.8628 to
+pay for its coverage lead. It reached 0.8389.
+
+This is the second reversal of this decision — E0-a chose BRICS on compression
+with no coverage data, E0-c reversed to rBRICS on coverage with no reconstruction
+data, R13 returns to BRICS with both measured. Each reversal followed a number
+that did not exist before it. The cost was two days, and the alternative was
+committing to rBRICS on half the evidence and finding out in week 9.
+
+rBRICS reconstructs worse for reasons intrinsic to it: 8.6 fragments per molecule
+against 7.1, more junction atoms each, and cut rings joining a fragment pair
+twice. BRICS also leads on edge-slot compression (14.4x vs 9.0x), so coverage was
+the only axis rBRICS ever won.
+
+**The ceiling, stated plainly:** exact top-1 is bounded by **0.71** for this
+representation, before the generator, the oracle or the RL are considered. Both
+factors are floors — coverage was still climbing steeply at 200k of 4M available
+corpus molecules, and the autoencoder is a fine-tune of someone else's chemistry.
+Against ~18% SOTA that is roughly 4x headroom, which answers the question R3
+raised and mis-framed.
+
+Worth reporting in the paper regardless: no published de novo method states the
+bound its own representation imposes.
+
+**Next, and the critical path is now spectrum conditioning.** With speed
+retired (R8) and the representation settled, the remaining unbuilt pieces are the
+spectrum-conditioned flow (E3) and the sampled-attachment head that gives GRPO
+per-atom credit. The second is small and depends on the first, so conditioning
+goes first.
+
+---
+
 ## 2026-09-22 — The three arms ran. Both of my hypotheses were wrong; the design got simpler
 
 Results in RESULTS.md R12. Full MassSpecGym BRICS test fold, Blossom decode:
