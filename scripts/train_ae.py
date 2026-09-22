@@ -20,6 +20,7 @@ head for reasons the pipeline never sees.
 """
 
 import argparse
+import copy
 import json
 import os
 import sys
@@ -100,8 +101,13 @@ def main():
     from fragfm.utils.file import read_yaml_as_easydict
 
     cfg = read_yaml_as_easydict(args.arch)
-    sets = {s: FragJunctionAEDataset(args.data, data_split=s, debug=False)
-            for s in ("train", "test")}
+    # py-lmdb refuses a second open of one environment, so build the train set and
+    # derive the test set from it by re-filtering the keys over the shared handle.
+    sets = {"train": FragJunctionAEDataset(args.data, data_split="train", debug=False)}
+    sets["test"] = copy.copy(sets["train"])
+    with sets["train"].env.begin() as txn:
+        sets["test"].keys = [k for k, _ in txn.cursor() if "test" in k.decode()]
+    sets["test"].length = len(sets["test"].keys)
     loaders = {
         s: DataLoader(d, batch_size=args.bs, shuffle=(s == "train"),
                       collate_fn=collate_frag_junction_ae_dataset,
