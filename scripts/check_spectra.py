@@ -58,9 +58,14 @@ def main():
     print(f"m/z range {b['mz'][b['peak_mask']].min():.2f} - "
           f"{b['mz'][b['peak_mask']].max():.2f}")
     print(f"precursor m/z {b['precursor_mz'].min():.1f} - {b['precursor_mz'].max():.1f}")
-    over = (b["mz"] > b["precursor_mz"].unsqueeze(1) + 1.0) & b["peak_mask"]
-    print(f"peaks above precursor+1 Da: {over.sum()} "
-          f"(should be ~0; fragments cannot outweigh the precursor)")
+    # A fragment cannot outweigh its precursor, but M+2 isotopes of Cl/Br/S
+    # compounds legitimately sit a few Da above it.  Report the excess, not a
+    # count: a few Da is chemistry, tens of Da is a parsing error.
+    excess = (b["mz"] - b["precursor_mz"].unsqueeze(1))[b["peak_mask"]]
+    over = excess[excess > 1.0]
+    print(f"peaks above precursor+1 Da: {over.numel()}/{b['peak_mask'].sum()}"
+          + (f", excess max {over.max():.2f} Da median {over.median():.2f} Da"
+             if over.numel() else ""))
     print(f"adducts {b['adduct'].bincount().tolist()}  "
           f"instruments {b['instrument'].bincount().tolist()}")
 

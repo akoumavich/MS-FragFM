@@ -67,6 +67,11 @@ Two adducts only, and `[M+Na]+` is 15.5% of the data — sodiated species
 fragment differently from protonated ones, so adduct is a conditioning input,
 not a nuisance variable.
 
+**Correction (2026-09-22).** The instrument column above is incomplete:
+172,058 + 53,823 = 225,881 of 231,104, leaving **5,223 spectra (2.26%) with a
+missing instrument type**. `value_counts()` drops NaN by default, so they never
+appeared. The encoder gives them their own category rather than imputing one.
+
 ### The decomposition grid
 
 | decomposition | canonicalisation | success | mean n_frag | edge-slot reduction | vocab | throughput |

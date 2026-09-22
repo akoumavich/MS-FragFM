@@ -66,6 +66,50 @@ PATCHES = [
     return mol""",
     ),
     dict(
+        name="fragfm-spectrum-conditioning",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "model" / "flow.py",
+        why=(
+            "Add an optional conditioning vector to the coarse GNN.  g_embd is "
+            "built once from the fragment bag, the timestep and the latent, then "
+            "carried through every layer, so a fourth slot reaches every node at "
+            "every depth.  Off by default, so unconditional FragFM is unchanged."
+        ),
+        marker="use_spectrum_cond",
+        old="""        # global feature embedder
+        self.merge_embd_g = MLP(
+            [cfg.embd_h_dim * 3, cfg.embd_h_dim, cfg.embd_h_dim],""",
+        new="""        # global feature embedder
+        self.merge_embd_g = MLP(
+            [cfg.embd_h_dim * (4 if cfg.get("use_spectrum_cond", False) else 3),
+             cfg.embd_h_dim, cfg.embd_h_dim],""",
+    ),
+    dict(
+        name="fragfm-spectrum-conditioning-sig",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "model" / "flow.py",
+        why="Second part: accept the vector.",
+        marker="cond=None,",
+        old="""        timestep,
+        frag_zs,
+        coarse_h_valency=None,
+    ):""",
+        new="""        timestep,
+        frag_zs,
+        coarse_h_valency=None,
+        cond=None,
+    ):""",
+    ),
+    dict(
+        name="fragfm-spectrum-conditioning-cat",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "model" / "flow.py",
+        why="Third part: concatenate it into the global feature.",
+        marker="g_embd_parts",
+        old="""        g_embd = torch.cat([frag_bag_embd_, timestep_embd, latent_z_embd], dim=1)""",
+        new="""        g_embd_parts = [frag_bag_embd_, timestep_embd, latent_z_embd]
+        if cond is not None:
+            g_embd_parts.append(cond)
+        g_embd = torch.cat(g_embd_parts, dim=1)""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(
