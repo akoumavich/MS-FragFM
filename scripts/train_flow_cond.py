@@ -26,6 +26,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
+from msfragfm import tracking
 from msfragfm.paths import RESULTS
 from msfragfm.spectra_data import make_spectrum_dataset
 from msfragfm.spectrum import SpectrumEncoder
@@ -122,6 +123,17 @@ def main():
              f"{sum(p.numel() for p in cond_model.parameters()) / 1e6:.1f}M)"
              if cond_model else ""))
 
+    run = tracking.init(tag, config={
+        **vars(args),
+        "n_train_spectra": len(ds["train"]),
+        "n_fragments": ds["train"].n_all_frag,
+        "params_total": sum(p.numel() for p in params),
+        "params_spectrum_encoder":
+            sum(p.numel() for p in cond_model.parameters()) if cond_model else 0,
+        "n_base_frag": cfg.n_base_frag,
+        "backbone": cfg.backbone_type,
+    })
+
     scheds = (DistortScheduler(cfg.node_distort_schedule),
               DistortScheduler(cfg.edge_distort_schedule),
               DistortScheduler(cfg.latent_z_distort_schedule))
@@ -135,6 +147,16 @@ def main():
         print(f"  ep {epoch:>3}  loss {r['loss']:.4f}  frag {r['fragment_type_loss']:.4f}"
               f"  edge {r['fragment_edge_loss']:.4f}  z {r['latent_loss']:.4f}"
               f"  [{time.perf_counter() - t0:.0f}s]", flush=True)
+        tracking.log(run, {
+            "epoch": epoch,
+            "loss/total": r["loss"],
+            "loss/fragment_type": r["fragment_type_loss"],
+            "loss/coarse_edge": r["fragment_edge_loss"],
+            "loss/latent_z": r["latent_loss"],
+            "lr": opt.param_groups[0]["lr"],
+            "iters_done": cfg.n_iter_done,
+            "epoch_seconds": r["time"],
+        }, step=epoch)
         torch.save({"frag_embedder": frag_embedder.state_dict(),
                     "coarse_gnn": coarse_gnn.state_dict(),
                     "cond_model": cond_model.state_dict() if cond_model else None,
@@ -142,6 +164,7 @@ def main():
 
     (RESULTS / f"train_{tag}.json").write_text(json.dumps(
         {"tag": tag, "args": vars(args), "history": history}, indent=2))
+    tracking.finish(run)
     print(f"\nwrote {RESULTS / (tag + '.pt')}")
 
 

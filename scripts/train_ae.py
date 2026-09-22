@@ -33,6 +33,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from msfragfm.attachment import attachment_loss
+from msfragfm import tracking
 from msfragfm.blossom import blossom_select
 from msfragfm.paths import RESULTS
 
@@ -132,6 +133,13 @@ def main():
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr,
                             weight_decay=cfg.weight_decay)
 
+    run = tracking.init(tag, config={
+        **vars(args),
+        "n_train": len(sets["train"]),
+        "n_test": len(sets["test"]),
+        "params": sum(p.numel() for p in model.parameters()),
+    })
+
     history, best, it = [], 0.0, 0
     warmup = cfg.lr_warmup_iter
     t0 = time.perf_counter()
@@ -163,6 +171,10 @@ def main():
         if epoch % 10 == 0 or epoch == args.epochs:
             ev = evaluate(model, loaders["test"], args.z, args.eval_batches)
             history.append({"epoch": epoch, "loss": tot / len(loaders["train"]), **ev})
+            tracking.log(run, {"epoch": epoch,
+                               "loss/train": tot / len(loaders["train"]),
+                               "acc/edge": ev["edge_acc"],
+                               "acc/graph": ev["graph_acc"]}, step=epoch)
             print(f"  ep {epoch:>4}  loss {tot / len(loaders['train']):.4f}  "
                   f"test edge {ev['edge_acc']:.4f}  graph {ev['graph_acc']:.4f}  "
                   f"[{time.perf_counter() - t0:.0f}s]", flush=True)
@@ -173,6 +185,9 @@ def main():
     final = evaluate(model, loaders["test"], args.z)  # full test fold
     print(f"\n{tag} final (full test): edge {final['edge_acc']:.4f}  "
           f"graph {final['graph_acc']:.4f}")
+    tracking.log(run, {"final/edge_acc": final["edge_acc"],
+                       "final/graph_acc": final["graph_acc"]}, step=args.epochs)
+    tracking.finish(run)
     (RESULTS / f"train_ae_{tag}.json").write_text(json.dumps(
         {"tag": tag, "args": vars(args), "history": history, "final": final}, indent=2))
 

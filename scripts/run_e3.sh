@@ -8,6 +8,11 @@
 # the spectrum-blind control is only useful if it lands with the real one.
 set -euo pipefail
 
+# EXP_NAME names the wandb run; submit.sh defaults it to the runai job name so
+# a run can be traced back to its job and forward from it.
+export EXP_NAME="${EXP_NAME:-flow_${COND:-spectrum}}"
+export WANDB_PROJECT="${WANDB_PROJECT:-MS-FragFM}"
+
 python scripts/train_flow_cond.py \
   --cond "${COND:-spectrum}" \
   --epochs "${EPOCHS:-30}" \
