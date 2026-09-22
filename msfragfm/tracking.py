@@ -8,6 +8,7 @@ Every call degrades to a no-op if wandb is missing, disabled or unreachable.
 A training run that has survived nine hours should not die at the logging call.
 """
 
+import hashlib
 import os
 
 
@@ -17,9 +18,15 @@ def init(default_name, config=None, project="MS-FragFM"):
     try:
         import wandb
 
+        name = os.environ.get("EXP_NAME") or default_name
         return wandb.init(
             project=os.environ.get("WANDB_PROJECT", project),
-            name=os.environ.get("EXP_NAME") or default_name,
+            name=name,
+            # A preempted job restarts into the same wandb run rather than
+            # littering the project with fragments of one experiment.  The id is
+            # derived from the name, so no state has to survive the preemption.
+            id=hashlib.md5(name.encode()).hexdigest()[:16],
+            resume="allow",
             config=config,
             reinit=True,
         )

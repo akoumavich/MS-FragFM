@@ -58,6 +58,9 @@ def main():
                          "here an epoch is 757 iters, so it would not finish "
                          "warming up until epoch 13")
     ap.add_argument("--tag", default=None)
+    ap.add_argument("--resume", default="auto", choices=["auto", "never"],
+                    help="auto picks up the checkpoint if one is there, which is "
+                         "what a preempted job needs on restart")
     args = ap.parse_args()
     tag = args.tag or f"flow_{args.cond}"
 
@@ -138,8 +141,30 @@ def main():
               DistortScheduler(cfg.edge_distort_schedule),
               DistortScheduler(cfg.latent_z_distort_schedule))
 
-    history, t0 = [], time.perf_counter()
-    for epoch in range(1, args.epochs + 1):
+    ckpt_path = RESULTS / f"{tag}.pt"
+    history, start_epoch = [], 1
+    if args.resume == "auto" and ckpt_path.exists():
+        ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        if "optimizer" in ck:
+            frag_embedder.load_state_dict(ck["frag_embedder"])
+            coarse_gnn.load_state_dict(ck["coarse_gnn"])
+            if cond_model is not None and ck.get("cond_model"):
+                cond_model.load_state_dict(ck["cond_model"])
+            opt.load_state_dict(ck["optimizer"])
+            cfg.n_iter_done = ck["n_iter_done"]
+            history = ck.get("history", [])
+            start_epoch = ck["epoch"] + 1
+            print(f"resumed from epoch {ck['epoch']} "
+                  f"({cfg.n_iter_done:,} iters done)")
+        else:
+            print(f"{ckpt_path.name} predates resume support; starting over")
+    if start_epoch > args.epochs:
+        print("already complete")
+        tracking.finish(run)
+        return
+
+    t0 = time.perf_counter()
+    for epoch in range(start_epoch, args.epochs + 1):
         r = tf.process_single_epoch(
             cfg, ae, frag_embedder, coarse_gnn, loaders["train"], scheds,
             frag_occurance_source="train", optimizer=opt, cond_model=cond_model)
@@ -157,10 +182,18 @@ def main():
             "iters_done": cfg.n_iter_done,
             "epoch_seconds": r["time"],
         }, step=epoch)
-        torch.save({"frag_embedder": frag_embedder.state_dict(),
+        # Write then rename: a preemption during torch.save would otherwise
+        # leave a truncated file, and the next restart would have nothing.
+        tmp = ckpt_path.with_suffix(".pt.tmp")
+        torch.save({"epoch": epoch,
+                    "frag_embedder": frag_embedder.state_dict(),
                     "coarse_gnn": coarse_gnn.state_dict(),
                     "cond_model": cond_model.state_dict() if cond_model else None,
-                    "cfg": dict(cfg)}, RESULTS / f"{tag}.pt")
+                    "optimizer": opt.state_dict(),
+                    "n_iter_done": cfg.n_iter_done,
+                    "history": history,
+                    "cfg": dict(cfg)}, tmp)
+        os.replace(tmp, ckpt_path)
 
     (RESULTS / f"train_{tag}.json").write_text(json.dumps(
         {"tag": tag, "args": vars(args), "history": history}, indent=2))
