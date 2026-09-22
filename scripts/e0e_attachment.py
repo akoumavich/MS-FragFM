@@ -56,7 +56,7 @@ def draw_z(like, transform):
     return z
 
 
-def evaluate(model, loader, z_mode, transform, sigma, seed):
+def evaluate(model, loader, z_mode, transform, sigma, seed, decode="threshold"):
     torch.manual_seed(seed)
     n_edge = n_graph = n_ok_edge = n_ok_graph = 0
     for graph in loader:
@@ -74,12 +74,16 @@ def evaluate(model, loader, z_mode, transform, sigma, seed):
             z = z[torch.randperm(z.size(0), device=z.device)]
         elif z_mode == "prior":
             z = draw_z(z, transform)
-        pred = torch.sigmoid(model.decode(
+        logits = model.decode(
             z, graph.h, graph.h_junction_count, graph.h_in_frag_label,
             graph.h_aux_frag_label, graph.decomp_e_index, graph.decomp_e,
             graph.ae_to_pred_index, graph.batch,
-        ))
-        wrong = ((pred > 0.5) != graph.ae_to_pred).int()
+        )
+        if decode == "blossom":
+            picked = blossom_select(logits, graph)
+        else:
+            picked = torch.sigmoid(logits) > 0.5
+        wrong = (picked != graph.ae_to_pred.bool()).int()
         pred_batch = graph.batch[graph.ae_to_pred_index[0]]
         wrong_graph = (scatter(wrong, pred_batch, reduce="sum") != 0).int()
         n_edge += wrong.numel()
