@@ -102,6 +102,11 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--cond-mode", default="real",
+                    choices=["real", "shuffled", "zero"],
+                    help="shuffled gives each spectrum another one's embedding: "
+                         "in-distribution by construction, so if the metrics do "
+                         "not move, conditioning is inert at generation time")
     ap.add_argument("--tag", default="eval_spectrum")
     args = ap.parse_args()
 
@@ -164,6 +169,10 @@ def main():
         dev = {k: v.cuda() for k, v in batch.items() if torch.is_tensor(v)}
         with torch.no_grad():
             cond = cond_model(dev)
+        if args.cond_mode == "shuffled" and cond.size(0) > 1:
+            cond = cond[torch.randperm(cond.size(0), device=cond.device)]
+        elif args.cond_mode == "zero":
+            cond = torch.zeros_like(cond)
         sampler.cond = cond.repeat_interleave(args.group, dim=0)
 
         ns = []
