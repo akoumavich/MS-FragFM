@@ -4,6 +4,65 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-23 — First de novo eval. Conditioning works; my bag hypothesis was wrong.
+
+Top-1 is 0 on 200 test spectra. Two findings behind that, one of them a
+retraction. RESULTS.md R16.
+
+**Conditioning reaches generation, confirmed three ways.** Real vs shuffled vs
+zero conditioning, same model, same everything else:
+
+- formula match **12x higher** with the right spectrum than a wrong one (0.0036
+  vs 0.0003), and zero with none;
+- max Tanimoto to truth **+0.084** for the right spectrum over a wrong one;
+- across/within ratio **0.99 at zero conditioning** -- samples for different
+  spectra as alike as samples for the same one, i.e. not conditioning -- falling
+  to 0.66 once any spectrum is present.
+
+The third is the E8 instrument doing exactly its job, and `shuffled` matching
+`real` there is correct rather than a null result: it still gets *a* spectrum, so
+it differentiates just as much, only toward the wrong target. That is the
+separation the metric was built for.
+
+**Retraction: the fragment bag is not the bottleneck.** I predicted in R4, and
+asserted here, that a 384-draw from an 81,739-fragment pool would rarely offer a
+target's fragments. Measured on the real occurrence weights: 0.742 per fragment
+per step against my estimated 0.0047, and a reachability bound on top-1 of 0.567
+against my estimated 0.001. **My arithmetic assumed uniform draws; the bag is
+occurrence-weighted**, which concentrates its 384 slots on exactly the fragments
+real molecules are built from. I had the weights in hand and used a uniform
+approximation anyway, then stated the conclusion with more confidence than the
+estimate deserved.
+
+**The real diagnosis inverts mine.** The bag does not fail to *offer* the right
+fragments, it fails to *exclude* the wrong ones. 99.6% of candidates carry a
+formula the target cannot have, and every one was knowable as impossible before
+being sampled. Proposal section 9 says the support is the strongest place for an
+exact constraint -- "mask the sampler so violations are unreachable, exact, free,
+no tradeoff against likelihood" -- and **we have none of it**; the formula is a
+soft encoder input and nothing else. The audit's thirtyfold formula-pruning
+result is the same observation from the other side.
+
+Same fix as R4 proposed, same code, opposite mechanism: prune the impossible
+rather than include the necessary.
+
+**On top-1 = 0.** Fragment perplexity 1.53 is teacher-forced, one variable at a
+time; generation composes ~8 such decisions from a masked start with errors
+compounding, which puts all-correct near 15% at 80% per-fragment accuracy and
+near 5% at 70%. 200 spectra cannot resolve below ~1.5%. DiffMS reports 0% and
+MADGEN 1.31% on this benchmark, so this is where unconstrained graph models sit
+before constraints go in.
+
+**Next:** the formula constraint in the support. `frag_mask` already exists in
+the generator as a per-node mask over the current bag, so the hook is there.
+
+**To check:** the reachability diagnostic reports 8.6 fragments per test
+molecule, but R2 measured BRICS at 7.06 and *rBRICS* at 8.65. Probably the test
+fold holding larger molecules, since it is MCES-disjoint rather than a random
+sample, but close enough to the rBRICS figure to verify rather than assume.
+
+---
+
 ## 2026-09-23 — E3 trained. Conditioning holds and strengthens. Resume earned itself.
 
 50 epochs each, both arms, ~9 h in parallel. RESULTS.md R15.

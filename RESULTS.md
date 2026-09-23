@@ -945,3 +945,90 @@ These are **training losses**. They establish that the conditioning path carries
 information and is used; they say nothing about top-1 or top-10 accuracy on the
 test fold, which needs generation. That is the next measurement and the first one
 comparable to anything in the literature.
+
+---
+
+## R16 — First de novo evaluation: conditioning works, accuracy is zero, and the bag is not why
+
+`scripts/eval_denovo.py` @ `2aa7555` · 200 MassSpecGym test spectra, G=16,
+100 Euler steps, ranked by sample frequency (no oracle)
+
+| | **real** | shuffled | zero |
+| --- | ---: | ---: | ---: |
+| formula match rate | **0.0036** | 0.0003 | 0.0000 |
+| max Tanimoto to truth | **0.2545** | 0.1708 | 0.1655 |
+| across/within ratio | 0.662 | 0.658 | **0.990** |
+| effective fragment vocabulary | 69.1 | 68.8 | **36.6** |
+| top-1 / top-10 | 0 | 0 | 0 |
+| validity | 0.934 | 0.939 | 0.946 |
+| unique per group of 16 | 14.9 | 15.0 | 15.1 |
+
+`shuffled` gives each spectrum another spectrum's embedding, so it is
+in-distribution by construction; `zero` removes conditioning entirely.
+
+### Conditioning reaches generation. Three independent signals say so.
+
+**Formula match is 12x higher with the right spectrum than a wrong one**
+(0.0036 vs 0.0003) and zero without any. A monotone ordering across three arms
+that differ only in the conditioning tensor can come from nothing else.
+
+**Max Tanimoto to truth is +0.084 for the right spectrum** over a wrong one.
+The model produces molecules measurably closer to the right answer when told
+which answer to aim at.
+
+**The across/within ratio does exactly what it was built for.** At zero
+conditioning it is 0.99: samples drawn for different spectra look as alike as
+samples drawn for the same one, which is the definition of not conditioning.
+Given any spectrum, right or wrong, it drops to 0.66. Note that `shuffled`
+matches `real` here, correctly — it still receives *a* spectrum, just the wrong
+one, so it differentiates just as much, only at the wrong target. That is the
+metric separating "is conditioning wired" from "is it conditioning on the right
+thing", which is what it was designed to do.
+
+The effective fragment vocabulary nearly doubles once a spectrum is present,
+69 against 37: conditioning is what makes the model reach into the pool at all.
+
+### The fragment-bag hypothesis is refuted
+
+R4 predicted, and I asserted, that a 384-draw from an 81,739-fragment pool would
+rarely offer the fragments a target needs. Measured, on the real occurrence
+weights:
+
+| | estimated (mine) | measured |
+| --- | ---: | ---: |
+| P(fragment offered at a step) | 0.0047 | **0.742** |
+| upper bound on exact top-1 | ~0.001 | **0.567** |
+
+The estimate assumed uniform draws. The bag is drawn **occurrence-weighted**,
+which concentrates its 384 slots on precisely the fragments real molecules are
+built from — which is the point of weighting it. The target is reachable for 57%
+of test molecules. **The bag is not the bottleneck and that hypothesis is
+withdrawn.**
+
+### What is actually wrong: nothing prunes the impossible
+
+The diagnosis inverts. The bag does not fail to *offer* the right fragments; it
+fails to *exclude* the wrong ones. 99.6% of generated candidates carry a formula
+the target cannot have, and every one of those was knowable as impossible before
+it was sampled.
+
+Proposal section 9 lists three places to put a constraint and says the support is
+the strongest: "mask the sampler so violations are unreachable. Exact, free, no
+tradeoff against likelihood." **We have none of it.** The formula is currently a
+soft input to an encoder and nothing more. The v1.5 audit's finding that formula
+pruning lifts a random baseline thirtyfold is the same observation from the
+other side.
+
+This is still the spectrum-filtered bag of R4, and the code is the same code,
+but the mechanism is the opposite of the one I gave: prune the impossible, not
+include the necessary.
+
+### On the zero top-1
+
+Two things, and neither is the model being broken. Fragment-type perplexity of
+1.53 is **teacher-forced, one variable at a time**; generation composes ~8 such
+decisions from a fully masked start with errors compounding, and at 80%
+per-fragment accuracy all-correct lands near 15%, at 70% near 5%. And 200
+spectra cannot resolve anything below about 1.5%. DiffMS reports 0% top-1 on
+MassSpecGym and MADGEN 1.31%, so this band is where unconstrained graph models
+sit before the constraints go in.
