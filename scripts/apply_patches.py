@@ -191,6 +191,24 @@ PATCHES = [
                     update_ema(cond_model, ema_cond_model)""",
     ),
     dict(
+        name="fragfm-generator-cond",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "Pass a conditioning vector to the coarse GNN at generation time. "
+            "Read off the sampler as an attribute rather than threaded through "
+            "sample_molecule_graph_dynamic and _calc_euler_step, so the diff is "
+            "one line and the unconditional path is untouched."
+        ),
+        marker="getattr(self, \"cond\", None)",
+        old="""                cur_frag_zs,
+                gen_h_valency,
+            )""",
+        new="""                cur_frag_zs,
+                gen_h_valency,
+                cond=getattr(self, "cond", None),
+            )""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(
