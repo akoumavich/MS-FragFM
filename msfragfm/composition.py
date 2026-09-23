@@ -40,12 +40,19 @@ def _feasible_suffix(remaining, n_slots_left, min_size, max_size):
     return n_slots_left * min_size <= total <= n_slots_left * max_size
 
 
-def project_molecule(scores, cand, frag_counts, target, beam=256, min_size=1,
-                     max_size=None):
+def project_molecule(scores, cand, frag_counts, target, beam=64, top_k=32,
+                     min_size=1, max_size=None):
     """Highest-scoring fragment assignment whose counts sum to `target`.
 
     scores: [k, n_cand] log-probabilities per slot over the candidate fragments
     cand:   [n_cand] global fragment ids
+    beam:   partial assignments kept per slot
+    top_k:  candidates considered per slot
+
+    Both are small on purpose: the search runs once per generated molecule and
+    the work is beam * top_k * k per molecule, so 256 x 256 x 20 would be 1.3M
+    Python iterations for a single molecule.
+
     Returns a list of k indices into `cand`, or None if nothing is feasible.
     """
     k, n_cand = scores.shape
@@ -60,7 +67,7 @@ def project_molecule(scores, cand, frag_counts, target, beam=256, min_size=1,
     states = [(0.0, target.astype(np.int32), [])]
     for step, slot in enumerate(order):
         left = k - step - 1
-        top = np.argsort(-scores[slot])[:beam]
+        top = np.argsort(-scores[slot])[:top_k]
         nxt = []
         for sc, rem, chosen in states:
             new_rem = rem[None, :] - counts[top]
@@ -72,19 +79,35 @@ def project_molecule(scores, cand, frag_counts, target, beam=256, min_size=1,
                 nxt.append((sc + scores[slot, top[j]], r, chosen + [(slot, top[j])]))
         if not nxt:
             return None
+        # Deduplicate on the remaining budget, keeping the best score for each.
+        # Without this the beam fills with variants that have spent the same
+        # atoms by different routes, so it explores one budget path deeply
+        # instead of many shallowly -- which is how a subset-sum beam starves.
         nxt.sort(key=lambda t: -t[0])
-        states = nxt[:beam]
+        seen, keep = set(), []
+        for st in nxt:
+            key = st[1].tobytes()
+            if key in seen:
+                continue
+            seen.add(key)
+            keep.append(st)
+            if len(keep) == beam:
+                break
+        states = keep
 
     best = states[0]
     if best[1].sum() != 0:
         return None
     out = [0] * k
-    for slot, j in best[2]:
-        out[slot] = int(np.argsort(-scores[slot])[:beam][j])
+    for slot, cand_idx in best[2]:
+        # `chosen` already holds candidate indices, not positions within `top`.
+        # Re-ranking them here indexed a second time and went out of bounds.
+        out[slot] = int(cand_idx)
     return out
 
 
-def project_batch(logits, batch, cand_ids, frag_counts, targets, beam=256):
+def project_batch(logits, batch, cand_ids, frag_counts, targets, beam=64,
+                  top_k=32):
     """Apply the projection per molecule; fall back to arg-max where infeasible.
 
     Returns (choice per node, fraction of molecules projected successfully).
@@ -97,7 +120,8 @@ def project_batch(logits, batch, cand_ids, frag_counts, targets, beam=256):
     for m in np.unique(b):
         slots = np.flatnonzero(b == m)
         n_mol += 1
-        got = project_molecule(logp[slots], cand, frag_counts, targets[m], beam)
+        got = project_molecule(logp[slots], cand, frag_counts, targets[m],
+                               beam=beam, top_k=top_k)
         if got is None:
             continue
         out[slots] = got
