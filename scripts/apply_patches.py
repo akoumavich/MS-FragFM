@@ -209,6 +209,31 @@ PATCHES = [
             )""",
     ),
     dict(
+        name="fragfm-formula-support-mask",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "Enforce the formula in the support.  frag_mask already gates which "
+            "fragments a node may take, so intersecting it with a per-molecule "
+            "admissibility mask makes compositionally impossible fragments "
+            "unreachable rather than merely unlikely.  Read off the sampler as an "
+            "attribute, so the unconditional path is untouched.  The any() guard "
+            "matters: a node with every candidate masked would give all -inf "
+            "logits and a NaN softmax, so such nodes keep the unconstrained mask."
+        ),
+        marker="frag_admissible",
+        old="""            frag_mask = frag_mask[:, :-1].bool()  # exc. M""",
+        new="""            frag_mask = frag_mask[:, :-1].bool()  # exc. M
+            adm = getattr(self, "frag_admissible", None)
+            if adm is not None:
+                # [bs, n_all_frag] -> [bs, n_cur_frag] -> [n_node, n_cur_frag];
+                # narrow to the bag first, or the intermediate is n_node x pool.
+                node_adm = adm[:, cur_frag_idxs[:-1]][graph.batch]
+                constrained = frag_mask & node_adm
+                frag_mask = torch.where(
+                    constrained.any(dim=1, keepdim=True), constrained, frag_mask
+                )""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(

@@ -39,6 +39,8 @@ from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
 from msfragfm import tracking
 from msfragfm.diversity import across_within_ratio, fragment_usage, group_metrics
+from msfragfm.formula_mask import (admissible, fragment_counts, report,
+                                   target_counts)
 from msfragfm.paths import RESULTS
 from msfragfm.spectrum import SpectrumEncoder
 
@@ -102,6 +104,8 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--formula-mask", default="on", choices=["on", "off"],
+                    help="enforce the formula in the support (section 9)")
     ap.add_argument("--cond-mode", default="real",
                     choices=["real", "shuffled", "zero"],
                     help="shuffled gives each spectrum another one's embedding: "
@@ -148,6 +152,11 @@ def main():
     # second open of one environment, so share its handle.
     env = sampler.test_set.env
     prior = frag_count_prior(env)
+    fcounts = None
+    if args.formula_mask == "on":
+        fcounts = fragment_counts(gcfg.frag_data_dirn,
+                                  cache=RESULTS / f"frag_counts_{stem}.npy")
+        print(f"fragment element counts: {fcounts.shape[0]:,} fragments")
     rng = np.random.default_rng(args.seed)
 
     from msfragfm.spectra_data import MassSpecGymSpectra, collate_spectra
@@ -175,6 +184,14 @@ def main():
             cond = torch.zeros_like(cond)
         sampler.cond = cond.repeat_interleave(args.group, dim=0)
 
+        if fcounts is not None:
+            adm = admissible(fcounts,
+                             target_counts([spec_ds.df.iloc[i].formula for i in chunk]))
+            if start == 0:
+                print(f"  formula mask: {report(adm, fcounts)}")
+            sampler.frag_admissible = torch.from_numpy(
+                adm).cuda().repeat_interleave(args.group, dim=0)
+
         ns = []
         for i in chunk:
             mol = Chem.MolFromSmiles(spec_ds.df.iloc[i].smiles)
@@ -201,6 +218,8 @@ def main():
     summary.update(across_within_ratio(groups))
     summary.update(fragment_usage(all_frags, sampler.n_all_frag))
     summary["ranking"] = "sample frequency (no oracle reranking)"
+    summary["formula_mask"] = args.formula_mask
+    summary["cond_mode"] = args.cond_mode
 
     print("\n" + "=" * 62)
     for k, v in summary.items():
