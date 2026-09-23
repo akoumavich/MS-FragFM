@@ -261,9 +261,21 @@ def score_group(cands, row):
                   if CalcMolFormula(Chem.MolFromSmiles(s)).rstrip("+-") == target]
     truth = Chem.CanonSmiles(row.smiles)
 
+    # How far off is the composition?  Containment being necessary but not
+    # sufficient, the question is whether the candidates are the right *size*
+    # with the wrong elements, or the wrong size entirely -- those want
+    # different constraints.
+    n_target = Chem.MolFromSmiles(row.smiles).GetNumHeavyAtoms()
+    heavy = [Chem.MolFromSmiles(s).GetNumHeavyAtoms() for s in ranked]
     out = {"validity": sum(counts.values()) / max(len(cands), 1),
            "n_unique": len(ranked),
-           "formula_match_rate": len(on_formula) / max(len(ranked), 1)}
+           "formula_match_rate": len(on_formula) / max(len(ranked), 1),
+           "heavy_atom_abs_err": float(np.mean([abs(h - n_target) for h in heavy]))
+                                 if heavy else 0.0,
+           "heavy_atom_signed_err": float(np.mean([h - n_target for h in heavy]))
+                                    if heavy else 0.0,
+           "heavy_atom_exact": float(np.mean([h == n_target for h in heavy]))
+                               if heavy else 0.0}
     for k in (1, 10):
         out[f"top{k}"] = float(truth in ranked[:k])
         out[f"top{k}_formula"] = float(truth in on_formula[:k])
