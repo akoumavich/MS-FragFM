@@ -267,6 +267,33 @@ PATCHES = [
             return glob_gen_h_type, gen_e_type, gen_z""",
     ),
     dict(
+        name="fragfm-composition-projection",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "Project the final fragment assignment onto sum(counts) == formula. "
+            "R18/R20: the bag offers fragments averaging 9.52 heavy atoms and the "
+            "true answer needs 4.15, so availability is not the constraint -- the "
+            "model selects 1.20 atoms/fragment below truth, which over ~7 slots is "
+            "the measured 6.97-atom shortfall.  The formula fixes the answer "
+            "exactly before generation starts, so this is a support constraint, "
+            "the third after attachment matching and the spanning tree."
+        ),
+        marker="composition_targets",
+        old="""            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
+            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]""",
+        new="""            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
+            targets = getattr(self, "composition_targets", None)
+            if targets is not None:
+                from msfragfm.composition import project_batch
+
+                gen_h_type, frac = project_batch(
+                    pred_h_logit[:, :n_cur_frag], batch,
+                    cur_frag_idxs[:n_cur_frag], self.composition_counts, targets,
+                )
+                self.last_projection_rate = frac
+            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(

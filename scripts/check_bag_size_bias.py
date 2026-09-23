@@ -97,8 +97,14 @@ def main():
         print("  The bag is unbiased, so the model prefers small fragments among")
         print("  those offered. The fix belongs in conditioning or in a projection,")
         print("  not in the draw.")
-    print(f"\n  generated molecules averaged 2.95 atoms/fragment (R18), so the")
-    print(f"  model-side gap is {2.95 - bag:+.2f} atoms beyond whatever the bag does.")
+    # The bag mean is not the target; the true mean is.  Comparing generated
+    # against the bag would overstate the model's error by whatever the bag's
+    # own skew happens to be.
+    print(f"\n  generated 2.95 atoms/fragment (R18) against a true {occ_weighted:.2f}:")
+    print(f"    model selects {occ_weighted - 2.95:+.2f} atoms/fragment below truth, "
+          f"{(occ_weighted - 2.95) / occ_weighted:.0%} too small")
+    print(f"    over 7.09 slots that is {(occ_weighted - 2.95) * 7.09:.2f} atoms, "
+          f"against a measured shortfall of 6.97")
 
 
 if __name__ == "__main__":

@@ -104,6 +104,8 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--composition", default="off", choices=["on", "off"],
+                    help="project the final assignment onto sum(counts)==formula")
     ap.add_argument("--tree-decode", default="on", choices=["on", "off"],
                     help="project coarse edges onto a spanning tree at the last "
                          "step; BRICS coarse graphs are trees without exception")
@@ -198,6 +200,10 @@ def main():
                 print(f"  formula mask: {report(adm, fcounts)}")
             sampler.frag_admissible = torch.from_numpy(
                 adm).cuda().repeat_interleave(args.group, dim=0)
+        if args.composition == "on":
+            tc = target_counts([spec_ds.df.iloc[i].formula for i in chunk])
+            sampler.composition_counts = fcounts
+            sampler.composition_targets = np.repeat(tc, args.group, axis=0)
 
         ns = []
         for i in chunk:
@@ -227,6 +233,10 @@ def main():
     summary["ranking"] = "sample frequency (no oracle reranking)"
     summary["formula_mask"] = args.formula_mask
     summary["tree_decode"] = args.tree_decode
+    summary["composition"] = args.composition
+    if args.composition == "on":
+        summary["projection_rate"] = float(
+            getattr(sampler, "last_projection_rate", float("nan")))
     summary["cond_mode"] = args.cond_mode
 
     print("\n" + "=" * 62)

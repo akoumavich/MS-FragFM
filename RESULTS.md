@@ -1231,3 +1231,62 @@ relative score between candidates rather than an absolute goodness of fit.
 Atom-level cleavage would explain more at much higher cost, which is exactly the
 tradeoff the differentiable relaxation exists to manage. That case for paper two
 is unaffected; what changes is that paper one does not need it.
+
+---
+
+## R20 — The shortfall is the model, not the bag
+
+`scripts/check_bag_size_bias.py`, 200 draws of 384 fragments from the 81,739
+drawable pool.
+
+| mean heavy atoms per fragment | |
+| --- | ---: |
+| occurrence-weighted over the pool (= total atoms / total fragments) | **4.15** |
+| unweighted over distinct fragments | 15.66 |
+| **offered by an actual drawn bag** | **9.52** |
+| **generated** (R18) | **2.95** |
+
+**The bag is biased large, not small**, which refutes the hypothesis this check
+was written to test. It offers fragments more than twice the size the answer
+needs. Availability is not the constraint in either direction — R16 showed the
+right fragments are offered 74% of the time, and R20 shows large fragments are
+offered in abundance.
+
+The reason the pool skews large is visible in the second row: distinct fragments
+average 15.66 heavy atoms, because the 200k-molecule corpus contributes a long
+tail of big rare fragments. Drawing 384 *distinct* fragments samples that tail
+heavily, so the set the model sees is nothing like the occurrence distribution
+that generated it.
+
+### The model selects 29% below truth
+
+Against the true mean of 4.15, generation produces 2.95 — **1.20 atoms per
+fragment too small**. Over 7.09 slots that is 8.51 atoms, against the 6.97
+shortfall R18 measured directly. The two agree, so the per-slot size preference
+accounts for essentially all of the composition error.
+
+The bag mean is not the reference here and comparing against it would overstate
+the model's error by the bag's own skew. The reference is the true mean.
+
+### Why this points at conditioning, and what to do without retraining
+
+**The formula fixes the answer exactly before generation begins.** Given the
+target's heavy-atom count and the fragment count drawn from p(n_frag | n_heavy),
+the mean fragment size is determined — 29.4 atoms over 7.09 slots is 4.15 per
+fragment, known in advance. The model is not using it.
+
+That is consistent with how the formula is currently delivered: a count vector
+concatenated into an MLP inside the spectrum encoder, arriving as one component
+of a single global vector. Method A specifies each element embedded with its
+count and injected by **cross-attention**, which we deviated from. Fixing that
+needs retraining.
+
+The composition projection needs neither. It enforces `sum(counts) == formula` on
+the final assignment by beam search over slots carrying the element budget, which
+is the third instance of the pattern the pipeline already runs twice: score
+locally, project onto a globally valid structure. Attachment by Blossom matching,
+connectivity by maximum-weight spanning tree, composition by budgeted beam.
+
+`projection_rate` reports the share of molecules for which a feasible assignment
+was found, which is the number that says whether the constraint is satisfiable
+from the model's own candidate ranking or whether it is being forced.
