@@ -212,6 +212,17 @@ def main():
             ns += [draw_n_frag(prior, nh, rng) for _ in range(args.group)]
 
         x = sampler.sample_molecule_graph_dynamic(n_frags=ns)
+        # Heavy atoms the chosen fragments carry, before assembly. The projection
+        # constrains this; every later metric is measured on the molecule that
+        # comes out of the coarse-to-fine decode, and reconstruct_to_rdmol keeps
+        # only the largest connected component. The gap between the two is
+        # therefore mass lost in assembly rather than mass never chosen.
+        chosen, cbatch = x[0].cpu().numpy(), x[-1].cpu().numpy()
+        intended = None
+        if fcounts is not None:
+            intended = np.array([fcounts[chosen[cbatch == m]].sum()
+                                 for m in np.unique(cbatch)])
+
         cands = sampler.store_smis_from_coarse_graph(*x)
         all_frags += [int(t) for t in x[0].cpu().tolist()]
 
@@ -219,7 +230,14 @@ def main():
             row = spec_ds.df.iloc[i]
             g = cands[j * args.group:(j + 1) * args.group]
             groups.append(g)
-            rows.append(score_group(g, row))
+            r = score_group(g, row)
+            if intended is not None:
+                sl = slice(j * args.group, (j + 1) * args.group)
+                n_true = Chem.MolFromSmiles(row.smiles).GetNumHeavyAtoms()
+                r["intended_heavy_err"] = float(np.mean(intended[sl] - n_true))
+                r["assembly_atom_loss"] = float(
+                    np.mean(intended[sl]) - (n_true + r["heavy_atom_signed_err"]))
+            rows.append(r)
         print(f"  {start + len(chunk):>5}/{len(idx)}  "
               f"top1={np.mean([r['top1'] for r in rows]):.4f} "
               f"top1_f={np.mean([r['top1_formula'] for r in rows]):.4f}",
