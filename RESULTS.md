@@ -1032,3 +1032,70 @@ per-fragment accuracy all-correct lands near 15%, at 70% near 5%. And 200
 spectra cannot resolve anything below about 1.5%. DiffMS reports 0% top-1 on
 MassSpecGym and MADGEN 1.31%, so this band is where unconstrained graph models
 sit before the constraints go in.
+
+---
+
+## R17 — Exact constraints in the support: the coarse graph is always a tree
+
+### The structural constraint, measured
+
+`scripts/check_support_constraints.py`, 2,000 MassSpecGym molecules, BRICS:
+
+| | |
+| --- | ---: |
+| coarse graph is a tree (`\|E\| = k-1`) | **1.0000** |
+| edge-count deviation from k-1 | `{0: 2000}` — a single bucket |
+| unconstrained edge configurations | 2^29.9 average |
+| spanning trees (Cayley, k^(k-2)) | 2^16.3 average |
+| **support prune** | **2^13.6, about 12,000x** |
+
+Not "mostly a tree" — structural, and it follows from what BRICS is. It cuts
+acyclic single bonds, and cutting a ring takes two cuts, which is the same fact
+that made 7.7% of rBRICS coarse edges two-bonded and 0.00% of BRICS ones (R11).
+
+This is an order of magnitude more constraining than the formula mask, and
+**connectivity comes with it**: every tree is connected, so section 9's second
+bullet is satisfied for free and disconnected components become unreachable
+rather than penalised.
+
+### Degree of unsaturation decomposes cleanly, once kekulized
+
+| | first attempt | after kekulizing |
+| --- | ---: | ---: |
+| molecule DBE minus summed fragment-internal DBE | mean 4.60, std 3.34 | **mean -0.21, std 0.64, median 0.00** |
+
+The first measurement was wrong, not the constraint weak. It tested bond order
+in (2.0, 3.0), so aromatic bonds at 1.5 were dropped and every benzene ring was
+undercounted by its three pi bonds. Section 9 says "Kekulize before applying it";
+it now does.
+
+With that fixed, **the fragments' internal DBEs sum to the molecule's DBE, median
+exactly**. Since the coarse graph is a tree and contributes no cycles, the
+molecule's DBE is entirely carried by the fragments — so the formula fixes a
+linear equality on the fragment *multiset*, checkable before any edge is drawn.
+That is a constraint on composition, which is where the remaining error lives.
+
+### Spanning-tree decode, measured
+
+200 test spectra, G=16, 100 steps, conditioning on, formula mask off:
+
+| | tree off | **tree on** |
+| --- | ---: | ---: |
+| validity | 0.9328 | **0.9950** |
+| unique per group of 16 | 14.91 | **15.89** |
+| formula match | 0.0048 | 0.0034 |
+| max Tanimoto to truth | 0.2491 | 0.2550 |
+| top-1 / top-10 | 0 | 0 |
+
+**Validity 93.3% to 99.5%**, and unique candidates per group 14.9 to 15.9. The
+invalid samples were largely coarse graphs that were disconnected or cyclic, and
+those are now unreachable. Every group of 16 now yields ~16 usable candidates
+instead of ~15.
+
+Accuracy does not move. That is consistent with the constraint doing what it
+claims: it removes structurally impossible outputs, and the remaining error is
+compositional, which is a different constraint's job.
+
+The formula-mask arms failed to run — `fragment_counts` opened the fragment LMDB
+while the generator already held it, the third instance of py-lmdb's single-open
+rule in this project. Fixed by reading the counts before the generator is built.
