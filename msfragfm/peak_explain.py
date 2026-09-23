@@ -128,3 +128,75 @@ def explained_fraction(sample, mz, intensity, adduct="[M+H]+", ppm=20.0,
         w = np.asarray(intensity, dtype=float)
         return float((w * hit).sum() / w.sum()), len(subs)
     return float(hit.mean()), len(subs)
+
+
+# --- applying the law to generated candidates -----------------------------
+#
+# R19 measured the separation and stopped there; the score was never wired into
+# generation or ranking.  Everything hard we enforce -- containment, spanning
+# tree, composition sum -- uses only the precursor formula, which comes from MS1.
+# The MS/MS peaks constrain nothing, which is the gap this closes.
+#
+# A generated candidate needs no re-decomposition: the sampler hands us the
+# coarse graph directly, so the subtree masses come straight off it.
+
+
+def pool_fragment_masses(frag_lmdb, cache=None):
+    """Monoisotopic mass each pool fragment contributes to a molecule.
+
+    Not the mass of the capped fragment.  A junction atom bonds to a neighbouring
+    fragment in the assembled molecule, so it carries one fewer hydrogen than the
+    standalone fragment would.  RDKit already accounts for this when the dummy
+    atoms are present, so summing atom masses plus `GetTotalNumHs` over the
+    non-dummy atoms is exact; `ExactMolWt` of the capped fragment is not.
+    """
+    import pickle
+
+    import numpy as np
+    from rdkit import Chem
+
+    if cache and __import__("pathlib").Path(cache).exists():
+        return np.load(cache)
+
+    import lmdb
+
+    env = lmdb.open(str(frag_lmdb), readonly=True, lock=False, readahead=True,
+                    meminit=False, map_size=int(1e12))
+    n = int(env.stat()["entries"])
+    out = np.zeros(n)
+    with env.begin() as txn:
+        for _, v in txn.cursor():
+            rec = pickle.loads(v)
+            i = int(rec["key"].split("_")[1])
+            m = Chem.MolFromSmiles(rec["smi"])
+            if m is None:
+                continue
+            out[i] = sum(_MASS.get(a.GetAtomicNum(), 0.0)
+                         + a.GetTotalNumHs() * _MASS[1]
+                         for a in m.GetAtoms() if a.GetAtomicNum() > 0)
+    env.close()
+    if cache:
+        np.save(cache, out)
+    return out
+
+
+def explained_from_coarse(frag_ids, edges, pool_masses, mz, intensity,
+                          adduct="[M+H]+", ppm=20.0, max_h_shift=2, max_cuts=1):
+    """Explained peak intensity for a generated coarse graph.
+
+    frag_ids: [k] global fragment ids chosen for this molecule
+    edges:    [2, n_edge] coarse edges, local indices
+    """
+    k = len(frag_ids)
+    if k == 0 or len(mz) == 0:
+        return 0.0
+    masses = pool_masses[np.asarray(frag_ids)]
+    subs = cleavage_subtrees(edges, k, max_cuts=max_cuts)
+    cand = np.array([masses[s].sum() for s in subs])
+    shifts = np.arange(-max_h_shift, max_h_shift + 1) * _MASS[1]
+    cand = (cand[:, None] + shifts[None, :]).ravel() + ADDUCT_MASS.get(adduct, PROTON)
+
+    mz = np.asarray(mz, dtype=float)
+    hit = np.array([np.abs(cand - m).min() <= m * ppm * 1e-6 for m in mz])
+    w = np.asarray(intensity, dtype=float)
+    return float((w * hit).sum() / w.sum()) if w.sum() > 0 else float(hit.mean())

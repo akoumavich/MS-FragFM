@@ -41,6 +41,7 @@ from msfragfm import tracking
 from msfragfm.diversity import across_within_ratio, fragment_usage, group_metrics
 from msfragfm.formula_mask import (admissible, fragment_counts, report,
                                    target_counts)
+from msfragfm.peak_explain import explained_from_coarse, pool_fragment_masses
 from msfragfm.paths import RESULTS
 from msfragfm.spectrum import SpectrumEncoder
 
@@ -104,6 +105,9 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--rank", default="frequency", choices=["frequency", "peaks"],
+                    help="peaks ranks by explained peak intensity -- the "
+                         "conservation law of Method C, applied exactly")
     ap.add_argument("--composition", default="off", choices=["on", "off"],
                     help="project the final assignment onto sum(counts)==formula")
     ap.add_argument("--tree-decode", default="on", choices=["on", "off"],
@@ -154,6 +158,11 @@ def main():
         fcounts = fragment_counts(gcfg.frag_data_dirn,
                                   cache=RESULTS / f"frag_counts_{stem}.npy")
         print(f"fragment element counts: {fcounts.shape[0]:,} fragments")
+
+    pool_masses = None
+    if args.rank == "peaks":
+        pool_masses = pool_fragment_masses(
+            gcfg.frag_data_dirn, cache=RESULTS / f"frag_masses_{stem}.npy")
 
     sampler = FragFMGenerator(gcfg)
     sampler.set_seed(args.seed)
@@ -218,6 +227,24 @@ def main():
         # only the largest connected component. The gap between the two is
         # therefore mass lost in assembly rather than mass never chosen.
         chosen, cbatch = x[0].cpu().numpy(), x[-1].cpu().numpy()
+        # Explained peak intensity per candidate, from the generated coarse graph
+        # directly -- no re-decomposition needed, the sampler already has it.
+        peak_scores = None
+        if pool_masses is not None:
+            ce_index = x[1].cpu().numpy()
+            ce_type = x[2].cpu().numpy()
+            peak_scores = []
+            for n_, m in enumerate(np.unique(cbatch)):
+                nodes = np.flatnonzero(cbatch == m)
+                lo = nodes.min()
+                sel = (ce_type == 1) & np.isin(ce_index[0], nodes)
+                edges = ce_index[:, sel] - lo
+                row_ = spec_ds.df.iloc[chunk[n_ // args.group]]
+                peak_scores.append(explained_from_coarse(
+                    chosen[nodes], edges, pool_masses,
+                    _floats_mz(row_.mzs), _floats_mz(row_.intensities),
+                    row_.adduct, max_cuts=1))
+            peak_scores = np.array(peak_scores)
         intended = None
         if fcounts is not None:
             intended = np.array([fcounts[chosen[cbatch == m]].sum()
@@ -230,7 +257,12 @@ def main():
             row = spec_ds.df.iloc[i]
             g = cands[j * args.group:(j + 1) * args.group]
             groups.append(g)
-            r = score_group(g, row)
+            ps = (peak_scores[j * args.group:(j + 1) * args.group]
+                  if peak_scores is not None else None)
+            r = score_group(g, row, peak_scores=ps)
+            if ps is not None:
+                r["explained_peaks_mean"] = float(np.mean(ps))
+                r["explained_peaks_max"] = float(np.max(ps))
             if intended is not None:
                 sl = slice(j * args.group, (j + 1) * args.group)
                 n_true = Chem.MolFromSmiles(row.smiles).GetNumHeavyAtoms()
@@ -248,7 +280,7 @@ def main():
     summary["n_spectra"] = len(rows)
     summary.update(across_within_ratio(groups))
     summary.update(fragment_usage(all_frags, sampler.n_all_frag))
-    summary["ranking"] = "sample frequency (no oracle reranking)"
+    summary["ranking"] = args.rank
     summary["formula_mask"] = args.formula_mask
     summary["tree_decode"] = args.tree_decode
     summary["composition"] = args.composition
@@ -270,21 +302,36 @@ def main():
     tracking.finish(run)
 
 
-def score_group(cands, row):
-    """Rank by frequency, then score top-k with and without the formula filter."""
+def _floats_mz(s):
+    return np.fromstring(str(s).strip("[]"), sep=",", dtype=np.float64)
+
+
+def score_group(cands, row, peak_scores=None):
+    """Score top-k with and without the formula filter.
+
+    Ranked by explained peak intensity when `peak_scores` is given, otherwise by
+    how often the model produced each candidate.  Frequency is a proxy for model
+    probability; peak explanation is the evidence itself, and it needs no oracle.
+    """
     target = row.formula
-    canon, counts = [], Counter()
-    for c in cands:
+    counts, best = Counter(), {}
+    for i, c in enumerate(cands):
         if not c or c == "X":
             continue
         try:
             m = Chem.MolFromSmiles(c)
             if m is None:
                 continue
-            counts[Chem.MolToSmiles(m)] += 1
+            cs = Chem.MolToSmiles(m)
         except Exception:  # noqa: BLE001
             continue
-    ranked = [s for s, _ in counts.most_common()]
+        counts[cs] += 1
+        if peak_scores is not None:
+            best[cs] = max(best.get(cs, -1.0), float(peak_scores[i]))
+    if peak_scores is not None and best:
+        ranked = sorted(best, key=lambda k: -best[k])
+    else:
+        ranked = [s for s, _ in counts.most_common()]
     on_formula = [s for s in ranked
                   if CalcMolFormula(Chem.MolFromSmiles(s)).rstrip("+-") == target]
     truth = Chem.CanonSmiles(row.smiles)
