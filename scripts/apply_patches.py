@@ -323,6 +323,62 @@ PATCHES = [
                 )""",
     ),
     dict(
+        name="fragfm-cache-frag-embeddings",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "Embedding the pool costs 1m47s at every startup -- 83,194 fragments "
+            "in chunks of 200, where building each chunk's graphs on CPU "
+            "dominates the GPU work.  The embedder is frozen at generation, so "
+            "the result depends only on its weights and the pool.  Keyed on the "
+            "embedder's own tensors, so a different checkpoint cannot silently "
+            "reuse another's embeddings."
+        ),
+        marker="_frag_z_cache",
+        old="""        all_frag_idxs = torch.arange(self.n_all_frag)""",
+        new="""        import hashlib
+        import os as _os
+
+        _key = hashlib.md5(repr(sorted(
+            (k, tuple(v.shape), round(float(v.double().sum()), 6))
+            for k, v in frag_embedder_sd.items()
+        )).encode() + str(self.n_all_frag).encode()).hexdigest()[:16]
+        self._frag_z_cache = _os.path.join(
+            _os.path.dirname(str(self.cfg.frag_data_dirn)), f"_frag_z_{_key}.pt"
+        )
+        self._frag_z_cached = _os.path.exists(self._frag_z_cache)
+        if self._frag_z_cached:
+            _c = torch.load(self._frag_z_cache, map_location="cuda")
+            self.all_frag_z, self.all_frag_junction_count = _c["z"], _c["jc"]
+            print(f"Fragment embeddings from cache: {self._frag_z_cache}")
+
+        all_frag_idxs = torch.arange(self.n_all_frag)""",
+    ),
+    dict(
+        name="fragfm-cache-frag-embeddings-skip",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why="Second part: an empty range skips the loop on a cache hit.",
+        marker="0 if self._frag_z_cached else self.n_all_frag",
+        old="""            range(0, self.n_all_frag, 200),""",
+        new="""            range(0, 0 if self._frag_z_cached else self.n_all_frag, 200),""",
+    ),
+    dict(
+        name="fragfm-cache-frag-embeddings-write",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why="Third part: keep the cached tensors on a hit, write them on a miss.",
+        marker="if not self._frag_z_cached:",
+        old="""        self.all_frag_z = torch.cat(frag_z_list, dim=0).detach()
+        self.all_frag_junction_count = torch.cat(
+            frag_junction_count_list, dim=0
+        ).detach()""",
+        new="""        if not self._frag_z_cached:
+            self.all_frag_z = torch.cat(frag_z_list, dim=0).detach()
+            self.all_frag_junction_count = torch.cat(
+                frag_junction_count_list, dim=0
+            ).detach()
+            torch.save({"z": self.all_frag_z,
+                        "jc": self.all_frag_junction_count}, self._frag_z_cache)""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(
