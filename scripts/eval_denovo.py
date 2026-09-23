@@ -104,6 +104,9 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--tree-decode", default="on", choices=["on", "off"],
+                    help="project coarse edges onto a spanning tree at the last "
+                         "step; BRICS coarse graphs are trees without exception")
     ap.add_argument("--formula-mask", default="on", choices=["on", "off"],
                     help="enforce the formula in the support (section 9)")
     ap.add_argument("--cond-mode", default="real",
@@ -144,6 +147,7 @@ def main():
 
     sampler = FragFMGenerator(gcfg)
     sampler.set_seed(args.seed)
+    sampler.spanning_tree_decode = args.tree_decode == "on"
 
     cond_model = SpectrumEncoder(out_dim=ck["cfg"]["embd_h_dim"]).cuda().eval()
     cond_model.load_state_dict(ck["ema"]["cond_model"] or ck["cond_model"])
@@ -219,6 +223,7 @@ def main():
     summary.update(fragment_usage(all_frags, sampler.n_all_frag))
     summary["ranking"] = "sample frequency (no oracle reranking)"
     summary["formula_mask"] = args.formula_mask
+    summary["tree_decode"] = args.tree_decode
     summary["cond_mode"] = args.cond_mode
 
     print("\n" + "=" * 62)

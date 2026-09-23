@@ -234,6 +234,39 @@ PATCHES = [
                 )""",
     ),
     dict(
+        name="fragfm-spanning-tree-decode",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "A BRICS coarse graph is always a tree (2,000/2,000 measured), so "
+            "project the final coarse-edge prediction onto a max-weight spanning "
+            "tree instead of thresholding each edge independently.  Same pattern "
+            "the codebase already uses for attachment -- local scores, global "
+            "combinatorial projection -- one level up.  pred_e1_prob has already "
+            "been resampled to a one-hot by this point, so the scores come from "
+            "pred_e_logit."
+        ),
+        marker="spanning_tree_decode",
+        old="""        if is_last:
+            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
+            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]
+            gen_e_type = torch.argmax(pred_e1_prob, dim=1)
+            gen_z = pred_z
+            return glob_gen_h_type, gen_e_type, gen_z""",
+        new="""        if is_last:
+            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
+            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]
+            gen_e_type = torch.argmax(pred_e1_prob, dim=1)
+            if getattr(self, "spanning_tree_decode", False):
+                from msfragfm.spanning_tree import max_weight_spanning_tree
+
+                bond_p = torch.softmax(pred_e_logit, dim=1)[:, 1]
+                gen_e_type = max_weight_spanning_tree(
+                    bond_p, full_e_index, batch
+                ).long()
+            gen_z = pred_z
+            return glob_gen_h_type, gen_e_type, gen_z""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(

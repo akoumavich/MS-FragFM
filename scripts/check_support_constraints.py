@@ -106,7 +106,14 @@ def main():
             if m is None:
                 ok = False
                 break
-            # Ring-bond and pi-bond count within the fragment, junctions ignored.
+            # Kekulize first, as section 9 says to.  Without it aromatic bonds
+            # come back as order 1.5, fall outside the (2.0, 3.0) test, and every
+            # benzene ring is undercounted by its three pi bonds.
+            try:
+                Chem.Kekulize(m, clearAromaticFlags=True)
+            except Exception:  # noqa: BLE001
+                ok = False
+                break
             internal += (m.GetRingInfo().NumRings()
                          + sum(b.GetBondTypeAsDouble() - 1
                                for b in m.GetBonds()
