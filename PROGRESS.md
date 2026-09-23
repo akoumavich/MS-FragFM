@@ -4,6 +4,53 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-23 — E3 trained. Conditioning holds and strengthens. Resume earned itself.
+
+50 epochs each, both arms, ~9 h in parallel. RESULTS.md R15.
+
+**Fragment-type loss 0.4266 conditioned against 0.7310 blind, a 41.6%
+reduction** — effectively choosing among 1.53 fragments rather than 2.08.
+
+**The gap widens monotonically**: -0.136 at epoch 2, -0.250 at 10, -0.285 at 20,
+-0.304 at 50. The model leans on the spectrum more as training proceeds, not
+less. Conditional generative models quietly falling back on the marginal is
+common enough to be worth ruling out, and monotone widening rules it out.
+
+The decomposition matches what R14 predicted from a single epoch: fragment type
+and latent both improve and keep improving, coarse edge is flat throughout. The
+spectrum says which fragments are present and how their atoms sit, and says
+nothing direct about which fragments bond to which. A signal that had improved
+all three equally would have been suspicious rather than reassuring.
+
+Neither arm has converged — both still falling ~0.009 per five epochs, in
+parallel, so more training improves both without obviously changing the
+comparison.
+
+**The resume machinery was exercised rather than merely tested.** The spectrum
+arm was preempted and resumed **four** times, the blind arm three. Loss is
+continuous across every boundary and the restored iteration counts are consistent
+(2,271 = 3 x 757). Without the checkpoint work these two runs would have
+restarted from scratch seven times between them and never finished. That was
+worth the detour.
+
+**Correction to my own verification.** `check_objectives.py`'s sign-asymmetry
+test used rewards `[0.9, 0.7, 0.6, 0.1]`, where only the obvious dud gets a
+negative advantage — so it asserted `(a < 0).any()`, which passed trivially and
+demonstrated nothing. The mechanism at issue is GRPO suppressing *correct*
+solutions that merely score below the group mean, which needs a group where every
+sample is good and they differ slightly. With `[0.90, 0.88, 0.86, 0.84]` GRPO
+assigns `[+1.162, +0.387, -0.387, -1.162]` and pushes down two of four correct
+solutions, while DMPO's weights are `[0.289, 0.261, 0.236, 0.214]`, ESS 0.988.
+The test now asserts that correct solutions are suppressed, so it fails if the
+group stops exercising the mechanism.
+
+**These are training losses.** They show the conditioning path carries
+information and is used. They say nothing about top-1 or top-10 on the test fold,
+which needs generation — the next measurement, and the first one comparable to
+anything in the literature.
+
+---
+
 ## 2026-09-22 — E9 added: the objective is an arm. Collapse instruments built.
 
 Read both repos rather than working from the abstracts, and the distinction

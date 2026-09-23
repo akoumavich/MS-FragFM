@@ -27,18 +27,24 @@ def check_sign_asymmetry():
     positive weight and merely allocates it less mass. Whether a second correct
     mode survives training is decided here.
     """
-    rewards = torch.tensor([[0.9, 0.7, 0.6, 0.1]])  # three good, one bad
+    # The group that matters is one where *every* sample is a good answer and
+    # they differ only slightly -- several distinct correct modes, which is the
+    # situation the collapse literature is about.  A group with one obvious dud
+    # would show GRPO suppressing only the dud, which proves nothing.
+    rewards = torch.tensor([[0.90, 0.88, 0.86, 0.84]])
     a = grpo_advantages(rewards)
     w, ess = dmpo_weights(rewards, alpha=0.2)
-    print(f"rewards        {rewards.tolist()[0]}")
+    print(f"rewards        {[round(x, 2) for x in rewards.tolist()[0]]}  (all correct)")
     print(f"GRPO advantage {[round(x, 3) for x in a.tolist()[0]]}")
     print(f"DMPO weight    {[round(x, 3) for x in w.tolist()[0]]}  ESS {ess.item():.3f}")
-    n_suppressed = int((a < 0).sum())
-    print(f"  GRPO pushes down {n_suppressed}/4 samples, including "
-          f"{int(((a < 0) & (rewards > 0.5)).sum())} that scored well")
+    good_suppressed = int(((a < 0) & (rewards > 0.5)).sum())
+    print(f"  GRPO pushes down {int((a < 0).sum())}/4, of which "
+          f"{good_suppressed} are correct solutions")
     print(f"  DMPO pushes down {int((w < 0).sum())}/4")
+    assert good_suppressed > 0, \
+        "the test group must contain correct solutions GRPO suppresses, or it " \
+        "is not exercising the collapse mechanism"
     assert (w > 0).all(), "DMPO weights must be positive to be mode-covering"
-    assert (a < 0).any(), "GRPO advantages must be signed"
 
     # A degenerate group: one sample far ahead. ESS reports whether the target
     # itself has collapsed, which is the knob alpha controls.

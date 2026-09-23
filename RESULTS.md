@@ -890,3 +890,58 @@ This is the same cost R8 found at generation startup (4m35s to embed 133k
 fragments), seen from the training side. It matters for GRPO: if the fragment
 embedder is frozen there, the cost vanishes and the embeddings can be cached
 once.
+
+---
+
+## R15 — E3: the spectrum-conditioned flow trains, and the conditioning holds
+
+50 epochs, batch 256, 193,948 MassSpecGym training spectra, BRICS, autoencoder
+`ae_ft_brics` frozen. Both arms identical apart from the conditioning path.
+~11 min/epoch, ~9 h each, run in parallel.
+
+| epoch | fragment-type loss | | latent z | | coarse edge |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| | spectrum | blind | spectrum | blind | delta |
+| 0 (untrained) | 16.7083 | 17.4392 | 0.7322 | 0.7989 | +0.39 |
+| 2 | 1.1761 | 1.3120 | 0.0621 | 0.0630 | +0.002 |
+| 10 | 0.6468 | 0.8964 | 0.0393 | 0.0402 | +0.002 |
+| 25 | 0.4961 | 0.7876 | 0.0255 | 0.0316 | -0.001 |
+| **50** | **0.4266** | **0.7310** | **0.0184** | **0.0276** | -0.002 |
+
+**Conditioning cuts fragment-type loss by 41.6%.** In perplexity terms the
+conditioned model is effectively choosing among 1.53 fragments where the blind
+one chooses among 2.08.
+
+**The gap widens monotonically** — -0.136 at epoch 2, -0.250 at 10, -0.285 at 20,
+-0.304 at 50. The model leans on the spectrum *more* as training proceeds, not
+less, which is the opposite of a conditioning path being gradually ignored in
+favour of the marginal fragment distribution. That failure is common enough in
+conditional generative models to be worth ruling out explicitly, and the
+monotone widening rules it out.
+
+**The latent gap widens too** (-0.0009 at epoch 10 to -0.0092 at 50) and the
+coarse-edge gap stays at zero throughout. This is exactly the decomposition R14
+predicted from one epoch: the spectrum says which fragments are present and
+something about how the atoms within them are arranged, and says nothing direct
+about which fragments bond to which. A conditioning signal that had improved all
+three equally would have been suspicious.
+
+**Neither arm has converged.** Both are still falling at epoch 50 at about
+-0.009 per five epochs, and in parallel, so the gap is stable rather than still
+opening. More epochs would improve both; they would not obviously change the
+comparison.
+
+### The resume machinery was exercised, not just tested
+
+The spectrum arm was preempted and resumed **four** times, the blind arm three.
+Loss is continuous across every boundary (epoch 3 -> 4: 5.1096 -> 4.5339, on the
+same trajectory as the surrounding epochs), and the restored iteration counts are
+consistent (2,271 = 3 x 757). Without the checkpoint work these runs would have
+restarted from scratch seven times between them and never finished.
+
+### What this is not
+
+These are **training losses**. They establish that the conditioning path carries
+information and is used; they say nothing about top-1 or top-10 accuracy on the
+test fold, which needs generation. That is the next measurement and the first one
+comparable to anything in the literature.
