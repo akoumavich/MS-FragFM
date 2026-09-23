@@ -294,6 +294,35 @@ PATCHES = [
             glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]""",
     ),
     dict(
+        name="fragfm-track-components",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "Count components before truncation.  reconstruct_to_rdmol is called "
+            "with get_largest=True, which keeps only the largest connected "
+            "component, and the following `assert not '.' in smi` then passes -- "
+            "so a disconnected assembly is recorded as a valid molecule rather "
+            "than rejected.  Measured, 79% of the heavy-atom shortfall is mass "
+            "discarded here.  Off unless the sampler asks for it."
+        ),
+        marker="track_components",
+        old="""                m = reconstruct_to_rdmol(
+                    h, e_index, e, is_relaxed=is_relaxed, get_largest=True
+                )""",
+        new="""                if getattr(self, "track_components", False):
+                    try:
+                        _raw = reconstruct_to_rdmol(
+                            h, e_index, e, is_relaxed=is_relaxed, get_largest=False
+                        )
+                        self.component_counts.append(
+                            Chem.MolToSmiles(_raw).count(".") + 1
+                        )
+                    except Exception:
+                        self.component_counts.append(-1)
+                m = reconstruct_to_rdmol(
+                    h, e_index, e, is_relaxed=is_relaxed, get_largest=True
+                )""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(

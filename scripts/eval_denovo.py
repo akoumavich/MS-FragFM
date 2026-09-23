@@ -167,6 +167,8 @@ def main():
     sampler = FragFMGenerator(gcfg)
     sampler.set_seed(args.seed)
     sampler.spanning_tree_decode = args.tree_decode == "on"
+    sampler.track_components = True
+    sampler.component_counts = []
 
     cond_model = SpectrumEncoder(out_dim=ck["cfg"]["embd_h_dim"]).cuda().eval()
     cond_model.load_state_dict(ck["ema"]["cond_model"] or ck["cond_model"])
@@ -280,6 +282,10 @@ def main():
     summary["n_spectra"] = len(rows)
     summary.update(across_within_ratio(groups))
     summary.update(fragment_usage(all_frags, sampler.n_all_frag))
+    cc = np.array([c for c in sampler.component_counts if c > 0])
+    if cc.size:
+        summary["assembly_components_mean"] = float(cc.mean())
+        summary["assembly_connected_frac"] = float((cc == 1).mean())
     summary["ranking"] = args.rank
     summary["formula_mask"] = args.formula_mask
     summary["tree_decode"] = args.tree_decode
