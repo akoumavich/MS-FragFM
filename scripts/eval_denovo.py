@@ -40,7 +40,6 @@ from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 from msfragfm import tracking
 from msfragfm.diversity import across_within_ratio, fragment_usage, group_metrics
 from msfragfm.paths import RESULTS
-from msfragfm.spectra_data import make_spectrum_dataset
 from msfragfm.spectrum import SpectrumEncoder
 
 FRAGFM = Path(__file__).resolve().parents[2] / "FragFM"
@@ -70,10 +69,10 @@ def export_for_generator(ckpt, out_dir, ae_dir):
     return ck
 
 
-def frag_count_prior(ds):
+def frag_count_prior(env):
     """p(n_frag | n_heavy) from the train fold."""
     prior = defaultdict(list)
-    with ds.env.begin() as txn:
+    with env.begin() as txn:
         for key, val in txn.cursor():
             if not key.decode().startswith("train"):
                 continue
@@ -140,20 +139,23 @@ def main():
     cond_model = SpectrumEncoder(out_dim=ck["cfg"]["embd_h_dim"]).cuda().eval()
     cond_model.load_state_dict(ck["ema"]["cond_model"] or ck["cond_model"])
 
-    ds = make_spectrum_dataset(
-        args.data, gcfg.frag_data_dirn, gcfg.frag_smi_to_idx_fn, fold=args.fold)
-    prior = frag_count_prior(ds)
+    # FragFMGenerator already opened the molecule LMDB, and py-lmdb refuses a
+    # second open of one environment, so share its handle.
+    env = sampler.test_set.env
+    prior = frag_count_prior(env)
     rng = np.random.default_rng(args.seed)
-    idx = list(range(len(ds)))
-    random.Random(args.seed).shuffle(idx)
-    idx = idx[:args.n_spectra]
-    print(f"{len(idx)} {args.fold} spectra x G={args.group} at {args.steps} steps")
-
-    from torch.utils.data import DataLoader
 
     from msfragfm.spectra_data import MassSpecGymSpectra, collate_spectra
 
-    spec_ds = MassSpecGymSpectra(ds.env, fold=args.fold)
+    spec_ds = MassSpecGymSpectra(env, fold=args.fold)
+    # Shuffle before truncating: the folds are not stored in a representative
+    # order, and a prefix scored ~11 points high on the autoencoder (R12).
+    idx = list(range(len(spec_ds)))
+    random.Random(args.seed).shuffle(idx)
+    idx = idx[:args.n_spectra]
+    print(f"{len(idx)} of {len(spec_ds):,} {args.fold} spectra "
+          f"x G={args.group} at {args.steps} steps")
+
     rows, groups, all_frags = [], [], []
     B = args.spectra_per_batch
     for start in range(0, len(idx), B):
@@ -170,11 +172,9 @@ def main():
             nh = mol.GetNumHeavyAtoms()
             ns += [draw_n_frag(prior, nh, rng) for _ in range(args.group)]
 
-        before = len(sampler.gen_smis)
         x = sampler.sample_molecule_graph_dynamic(n_frags=ns)
         cands = sampler.store_smis_from_coarse_graph(*x)
         all_frags += [int(t) for t in x[0].cpu().tolist()]
-        del before
 
         for j, i in enumerate(chunk):
             row = spec_ds.df.iloc[i]
