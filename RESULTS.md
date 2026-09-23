@@ -1099,3 +1099,70 @@ compositional, which is a different constraint's job.
 The formula-mask arms failed to run — `fragment_counts` opened the fragment LMDB
 while the generator already held it, the third instance of py-lmdb's single-open
 rule in this project. Fixed by reading the counts before the generator is built.
+
+---
+
+## R18 — The binding error, identified: composition, and it is systematic
+
+200 test spectra, conditioning on, formula mask and tree decode both on.
+
+| | |
+| --- | ---: |
+| heavy atoms, signed error | **-6.97** |
+| heavy atoms, absolute error | 9.85 |
+| exact heavy-atom count | 0.045 |
+| formula match | 0.0038 |
+
+Target molecules average 27.9 heavy atoms over 7.09 fragments, 3.94 atoms per
+fragment. Generated molecules average **20.9 over the same 7.09 slots, 2.95 atoms
+per fragment** — one atom too small in every slot, a 25% shortfall on the whole
+molecule. Absolute error 9.85 against signed -6.97 makes it a systematic bias,
+not symmetric noise.
+
+### The mechanism is the bag, and it is the same choice that fixed reachability
+
+Drawing the bag occurrence-weighted is what makes the right fragments reachable
+at all — R16 measured 74% per-fragment availability per step, against the 0.5%
+a uniform draw would give. But occurrence weighting favours **common** fragments,
+and common fragments are **small** ones: benzene, methyl, carbonyl. The decision
+that rescued reachability biases composition, and the two pull against each
+other.
+
+### Why the formula mask could not fix it
+
+Elementwise containment is necessary and not sufficient. Seven fragments that
+each fit inside C17H19NO3 will almost never *be* C17H19NO3. Measured, it moved
+formula match from 0.0034 to 0.0050 — a 47% relative lift on a 0.5% base, which
+is to say nothing.
+
+I built the weak constraint first. The strong structural constraint (spanning
+tree) was worth 2^13.6 of support and lifted validity to 99.5%, and the strong
+compositional constraint is the one still missing.
+
+### The grid, for the record
+
+| arm | validity | unique/16 | formula match | max Tanimoto |
+| --- | ---: | ---: | ---: | ---: |
+| neither | 0.9328 | 14.91 | 0.0048 | 0.2491 |
+| tree only | 0.9950 | 15.89 | 0.0034 | 0.2550 |
+| formula + tree | **0.9962** | 15.90 | 0.0050 | 0.2565 |
+
+Validity and uniqueness are solved. Composition is not, and top-1 cannot move
+until it is: a molecule with the wrong formula is wrong before anything else is
+considered.
+
+### The fix, as the third instance of an established pattern
+
+`msfragfm/composition.py` projects the final fragment assignment onto the
+constraint `sum of fragment counts == formula`, by beam search over slots
+carrying the element budget. Two prunes make the subset-sum tractable: a partial
+assignment that has overspent any element is dead, and so is one whose remaining
+slots cannot supply what is left. Slots are filled most-confident first, so the
+budget has the most to prune against early.
+
+That is the third time this shape has been the answer — score locally, project
+onto a globally valid structure. Blossom matching for attachment, maximum-weight
+spanning tree for connectivity, budgeted beam search for composition. All three
+are exact, all three live in the support, and none of them is available to a
+string model, which is the argument Method A makes and this is the evidence for
+it.
