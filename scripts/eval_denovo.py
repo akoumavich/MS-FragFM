@@ -145,6 +145,14 @@ def main():
     gcfg.force_save_dirn = gcfg.save_dirn = str(RESULTS / "_eval_scratch")
     os.makedirs(gcfg.save_dirn, exist_ok=True)
 
+    # Before the generator: it opens the fragment LMDB and py-lmdb refuses a
+    # second open of one environment.  Cached, so later runs pay nothing.
+    fcounts = None
+    if args.formula_mask == "on":
+        fcounts = fragment_counts(gcfg.frag_data_dirn,
+                                  cache=RESULTS / f"frag_counts_{stem}.npy")
+        print(f"fragment element counts: {fcounts.shape[0]:,} fragments")
+
     sampler = FragFMGenerator(gcfg)
     sampler.set_seed(args.seed)
     sampler.spanning_tree_decode = args.tree_decode == "on"
@@ -156,11 +164,6 @@ def main():
     # second open of one environment, so share its handle.
     env = sampler.test_set.env
     prior = frag_count_prior(env)
-    fcounts = None
-    if args.formula_mask == "on":
-        fcounts = fragment_counts(gcfg.frag_data_dirn,
-                                  cache=RESULTS / f"frag_counts_{stem}.npy")
-        print(f"fragment element counts: {fcounts.shape[0]:,} fragments")
     rng = np.random.default_rng(args.seed)
 
     from msfragfm.spectra_data import MassSpecGymSpectra, collate_spectra
