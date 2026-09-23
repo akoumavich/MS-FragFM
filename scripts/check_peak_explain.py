@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from msfragfm.paths import MSG_TSV
-from msfragfm.peak_explain import connected_subtrees, explained_fraction
+from msfragfm.peak_explain import explained_fraction
 
 FRAGFM = Path(__file__).resolve().parents[2] / "FragFM"
 
@@ -44,6 +44,8 @@ def main():
     ap.add_argument("--fold", default="test")
     ap.add_argument("--n", type=int, default=300)
     ap.add_argument("--ppm", type=float, default=20.0)
+    ap.add_argument("--max-cuts", type=int, default=3,
+                    help="MAGMa and ICEBERG model 1-3 bond cleavages")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -72,7 +74,8 @@ def main():
         if mz.size == 0:
             continue
         smp = by_smi[row.smiles]
-        t, ns = explained_fraction(smp, mz, inten, row.adduct, args.ppm)
+        t, ns = explained_fraction(smp, mz, inten, row.adduct, args.ppm,
+                                  max_cuts=args.max_cuts)
         true_s.append(t)
         n_subs.append(ns)
         n_frags.append(int(smp["n_frag"]))
@@ -83,8 +86,9 @@ def main():
         for _ in range(20):
             d = pool[rng.randrange(len(pool))]
             if d["smi"] != row.smiles and abs(int(d["n_frag"]) - target) <= 1:
-                decoy_s.append(explained_fraction(d, mz, inten, row.adduct,
-                                                  args.ppm)[0])
+                decoy_s.append(explained_fraction(
+                    d, mz, inten, row.adduct, args.ppm,
+                    max_cuts=args.max_cuts)[0])
                 break
 
     t, d = np.array(true_s), np.array(decoy_s)

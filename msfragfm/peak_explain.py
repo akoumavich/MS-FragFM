@@ -6,12 +6,20 @@ allowing for hydrogen rearrangements.  It then says exact enumeration over
 connected subgraphs is exponential and reaches for a differentiable relaxation,
 deferred to the second paper.
 
-**At fragment level the enumeration is not exponential, it is trivial, and two
-measurements make it so.**  A molecule has ~7 fragments rather than ~28 heavy
-atoms, so the subset space is 2^7 = 128 rather than 2^28 = 268 million.  And the
-BRICS coarse graph is always a tree (R17, 2000/2000), so only connected subtrees
-count: 28 of them for a 7-node path, 70 for a 7-node star.  The relaxation is an
-atom-level necessity; it is not needed here.
+**At fragment level the enumeration is tractable, but not for the reason I first
+gave.**  Moving from ~28 heavy atoms to ~7 fragments takes the subset space from
+2^28 to 2^7, and the tree structure (R17) restricts it further to connected
+subtrees.  That argument is right on the mean and wrong on the tail: measured,
+molecules average 17,101 connected subtrees and reach 553,030, because the cost
+is mean(2^k) and not 2^(mean k), and the test fold runs to k ~ 20.
+
+What makes it genuinely cheap is a restriction that is also more faithful to the
+chemistry.  MAGMa and ICEBERG model fragments as the result of breaking one to
+three bonds, not as arbitrary connected subgraphs.  On a tree, cutting j edges
+yields exactly j+1 components, so bounding the cuts turns 2^k into O(k^d): at
+k=20 that is 1,160 cut-sets rather than a million subsets.  The relaxation
+remains what paper two needs for gradients and for atom-level work; the law
+itself is usable exactly, here, now.
 
 So the only physics that knows about the observation becomes available in the
 support and as an exact score, in paper one, rather than as a soft loss in paper
@@ -57,32 +65,47 @@ def fragment_masses(sample):
     return out
 
 
-def connected_subtrees(edge_index, k):
-    """Every connected vertex subset of the coarse tree, as boolean masks."""
-    adj = [[] for _ in range(k)]
+def cleavage_subtrees(edge_index, k, max_cuts=3):
+    """Fragments reachable by breaking at most `max_cuts` coarse bonds.
+
+    Not every connected subtree: MAGMa and ICEBERG model fragmentation as one to
+    three bond cleavages, and enumerating all connected subtrees both overcounts
+    chemically and costs mean(2^k), measured at 17,101 per molecule and 553,030
+    at the tail.  On a tree, cutting j edges yields exactly j+1 components, so
+    this is O(k^max_cuts).
+    """
     ei = np.asarray(edge_index)
-    if ei.ndim == 2:
-        for a, b in zip(ei[0], ei[1]):
-            adj[int(a)].append(int(b))
-            adj[int(b)].append(int(a))
-    out = []
-    for r in range(1, k + 1):
-        for s in itertools.combinations(range(k), r):
-            ss = set(s)
-            seen, stack = {s[0]}, [s[0]]
-            while stack:
-                u = stack.pop()
-                for v in adj[u]:
-                    if v in ss and v not in seen:
-                        seen.add(v)
-                        stack.append(v)
-            if seen == ss:
-                out.append(np.array(s))
+    edges = list(zip(ei[0], ei[1])) if ei.ndim == 2 else []
+    seen, out = set(), []
+    for j in range(0, min(max_cuts, len(edges)) + 1):
+        for cut in itertools.combinations(range(len(edges)), j):
+            parent = list(range(k))
+
+            def find(x):
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+
+            for e, (a, b) in enumerate(edges):
+                if e in cut:
+                    continue
+                ra, rb = find(int(a)), find(int(b))
+                if ra != rb:
+                    parent[ra] = rb
+            comps = {}
+            for v in range(k):
+                comps.setdefault(find(v), []).append(v)
+            for c in comps.values():
+                key = tuple(c)
+                if key not in seen:
+                    seen.add(key)
+                    out.append(np.array(c))
     return out
 
 
 def explained_fraction(sample, mz, intensity, adduct="[M+H]+", ppm=20.0,
-                       max_h_shift=2, intensity_weighted=True):
+                       max_h_shift=2, intensity_weighted=True, max_cuts=3):
     """Share of observed peaks explainable by some connected subtree.
 
     Hydrogen rearrangement is the reason for `max_h_shift`: a fragment leaves
@@ -91,7 +114,8 @@ def explained_fraction(sample, mz, intensity, adduct="[M+H]+", ppm=20.0,
     standard allowance rather than a fudge factor.
     """
     masses = fragment_masses(sample)
-    subs = connected_subtrees(sample["coarse_e_index"], int(sample["n_frag"]))
+    subs = cleavage_subtrees(sample["coarse_e_index"], int(sample["n_frag"]),
+                             max_cuts=max_cuts)
     cand = np.array([masses[s].sum() for s in subs])
     shifts = np.arange(-max_h_shift, max_h_shift + 1) * _MASS[1]
     cand = (cand[:, None] + shifts[None, :]).ravel() + ADDUCT_MASS.get(adduct, PROTON)
