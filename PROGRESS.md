@@ -4,6 +4,60 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-23 — Method C moves into paper one. Peak explanation separates at d=1.32.
+
+Conservation of composition, computed exactly at fragment level. 300 test
+spectra, 20 ppm, size-matched decoys. RESULTS.md R19.
+
+| max cuts | candidates/mol | true | decoy | separation | Cohen's d |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| **1** | **20.6** | 0.3544 | 0.0092 | **+0.345** | **1.32** |
+| 3 | 271.1 | 0.4178 | 0.0233 | +0.395 | 1.44 |
+
+**The law separates true from decoy with no oracle, no training and no learned
+model** — arithmetic on the conservation law. True beats decoy on 75% of spectra
+at one cleavage.
+
+**Two corrections to my own cost claim, in sequence.** I said fragment-level
+enumeration was trivial because 2^7 = 128. That used 2^(mean k) where the cost
+is mean(2^k) — measured, all connected subtrees average **4,062,211** per
+molecule, since the test fold reaches k ~ 20. Averaging the exponent instead of
+the exponential hid the tail, and the script I wrote printed the misleading
+comparison rather than the real one.
+
+The fix is also the chemistry. MAGMa and ICEBERG model one to three bond
+cleavages, not arbitrary connected subgraphs, and on a tree cutting j edges gives
+exactly j+1 components — so bounding cuts turns 2^k into O(k^d). One cut is
+**197,195x cheaper than full enumeration** and keeps 87% of the separation.
+Returns collapse after that: 1->2 buys +0.041 for 3.9x cost, 2->3 buys +0.008 for
+3.3x.
+
+Enumerating everything was therefore both expensive *and* chemically wrong: the
+decoy score rises with depth (0.0092 -> 0.0233) because more candidates mean more
+accidental explanations. My original 0.436 was inflated on both arms.
+
+**This is the missing signal from R18, in its most literal form.** Generated
+molecules run 6.97 heavy atoms short because the occurrence-weighted bag favours
+small common fragments and nothing told the model how big the pieces should be.
+At one cleavage the candidates are exactly the two pieces a molecule splits into
+at a single coarse bond, so the peaks constrain those sizes directly.
+
+**Proposal updated: Method C's exact form moves into paper one.** Three uses
+follow — rerank with no oracle call, select the bag from evidence rather than
+occurrence (which is what Method A asks for), and supply a reward term immune to
+the oracle-leakage problem the audit flags, since it is arithmetic and not a
+learned simulator. The differentiable relaxation stays paper two's contribution
+for what the exact version cannot do: flow gradients into the edge tensor, and
+reach atom-level cleavages where enumeration really is exponential.
+
+**A limit worth stating before a reviewer does.** The true structure explains
+only 35-42% of peak intensity, and the remainder is structural rather than noise:
+real fragmentation also breaks bonds *inside* BRICS fragments, which the coarse
+graph cannot express. So this is a relative score between candidates, not an
+absolute goodness of fit.
+
+---
+
 ## 2026-09-23 — First de novo eval. Conditioning works; my bag hypothesis was wrong.
 
 Top-1 is 0 on 200 test spectra. Two findings behind that, one of them a

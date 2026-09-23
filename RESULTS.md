@@ -1166,3 +1166,68 @@ spanning tree for connectivity, budgeted beam search for composition. All three
 are exact, all three live in the support, and none of them is available to a
 string model, which is the argument Method A makes and this is the evidence for
 it.
+
+---
+
+## R19 — Method C, exact and cheap: peak explanation separates true from decoy
+
+`scripts/check_peak_explain.py`, 300 MassSpecGym test spectra, 20 ppm, +/-2 H.
+Decoys are size-matched, so this is not "larger molecules explain more peaks".
+
+| max cuts | candidates/mol | true | decoy | separation | Cohen's d | true wins |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **1** | **20.6** | 0.3544 | 0.0092 | **+0.345** | **1.32** | 75.3% |
+| 2 | 81.1 | 0.4052 | 0.0186 | +0.387 | 1.43 | 78.4% |
+| 3 | 271.1 | 0.4178 | 0.0233 | +0.395 | 1.44 | 78.4% |
+
+**The law separates the true structure from a decoy with Cohen's d 1.3-1.4, with
+no oracle, no training and no learned model** — arithmetic on the conservation
+law alone. That is a usable reranking signal today.
+
+### The cost claim, corrected twice
+
+I first argued fragment-level enumeration was trivial because 2^7 = 128. That
+used 2^(mean k) where the cost is mean(2^k): measured, all connected subtrees
+average **4,062,211** per molecule, since the test fold runs to k ~ 20. Averaging
+the exponent instead of the exponential is what hid the tail.
+
+Bounding by cleavage count fixes it and is more faithful to the chemistry, since
+MAGMa and ICEBERG model one to three bond cleavages rather than arbitrary
+connected subgraphs:
+
+| max cuts | cheaper than full enumeration |
+| ---: | ---: |
+| 1 | **197,195x** |
+| 3 | 14,984x |
+
+**One cut is the operating point.** It keeps 87% of the separation for a quarter
+of the cost of two cuts, and returns collapse after that: 1->2 buys +0.041 for
+3.9x, 2->3 buys +0.008 for 3.3x. At 20.6 candidate masses per molecule this is
+free even inside an RL loop — 160k generations per epoch is 3.3M mass
+comparisons.
+
+Note the decoy score *rises* with cut depth (0.0092 -> 0.0233): more candidate
+fragments mean more chances to explain a peak by accident. Deeper enumeration
+inflates both arms, which is the quantitative form of the objection that
+unrestricted subtrees credit fragments deep cleavage would never produce.
+
+### Why this matters for R18 specifically
+
+Generated molecules run 6.97 heavy atoms short because the occurrence-weighted
+bag favours small common fragments and nothing told the model how big the pieces
+should be. **At one cut, the candidate fragments are exactly the two pieces the
+molecule splits into at a single coarse bond** — so the observed peaks constrain
+those piece sizes directly. This is the missing signal in its most literal form.
+
+### A limitation to state rather than discover
+
+The true structure explains only 35-42% of peak intensity. The remainder is
+structural, not noise: real fragmentation also breaks bonds *inside* BRICS
+fragments, which the coarse graph cannot express, and multi-step fragmentation
+goes beyond three cleavages. So the explained fraction has a ceiling well below 1
+for reasons intrinsic to using the coarse graph, and it should be reported as a
+relative score between candidates rather than an absolute goodness of fit.
+
+Atom-level cleavage would explain more at much higher cost, which is exactly the
+tradeoff the differentiable relaxation exists to manage. That case for paper two
+is unaffected; what changes is that paper one does not need it.
