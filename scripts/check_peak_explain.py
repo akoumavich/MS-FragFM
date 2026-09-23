@@ -92,9 +92,12 @@ def main():
                 break
 
     t, d = np.array(true_s), np.array(decoy_s)
-    print(f"connected subtrees per molecule: mean {np.mean(n_subs):.1f} "
+    print(f"candidate fragments per molecule: mean {np.mean(n_subs):.1f} "
           f"max {max(n_subs)} (over {np.mean(n_frags):.1f} fragments)")
-    print(f"  2^k would be {2 ** np.mean(n_frags):.0f}; the tree structure cuts it\n")
+    # mean(2^k), not 2^(mean k): the tail is what costs, and averaging the
+    # exponent instead of the exponential is the error that hid it.
+    print(f"  all connected subtrees would average "
+          f"{np.mean([2.0 ** k for k in n_frags]):,.0f}\n")
     print(f"explained peak intensity, true structure : {t.mean():.4f} "
           f"(median {np.median(t):.4f})")
     print(f"explained peak intensity, size-matched decoy: {d.mean():.4f} "
