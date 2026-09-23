@@ -4,6 +4,59 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-23 — The bottleneck is atom-level assembly. Four hypotheses retracted.
+
+**Only 35.3% of assemblies come out in one piece**, 2.37 components on average,
+and 79% of the heavy-atom shortfall is mass discarded at assembly rather than
+never chosen. RESULTS.md R21.
+
+`reconstruct_to_rdmol(get_largest=True)` keeps the largest connected component
+and the following "no dot in the SMILES" assert then passes, so **a broken
+assembly is recorded as a valid molecule**. Validity 0.991 with top-1 zero: we
+have been measuring successful truncation as success.
+
+**The chain of hypotheses I ran through, and where each died:**
+
+1. the bag does not offer the right fragments — refuted (R16, 74% availability)
+2. the bag offers fragments that are too small — refuted (R20, it offers 9.52
+   heavy atoms where 4.15 is needed)
+3. the model picks fragments that are too small — true but minor, 21%
+4. composition is unconstrained — fixed, and it made the signed error *worse*,
+   because larger chosen fragments mean more mass to lose
+
+Each was measured and each was wrong or secondary, and the answer was downstream
+of all of them. What I should have noticed sooner: R13 measured the autoencoder
+at 97.9% *on ground-truth coarse graphs with the encoded latent*, and generation
+supplies neither. That gap was visible from R13 onward.
+
+**The mechanism.** We enforce the coarse graph is a tree, so fragments are
+connected *there*. Atom-level bonds come from Blossom max-weight matching over
+junction slots, and a matching is not required to realise the coarse tree — it
+can bond A-B twice and leave A-C unbonded, or pair non-adjacent fragments. The
+spanning-tree constraint bought connectivity at the coarse level and nothing at
+the atom level, which is where the molecule is.
+
+**The fix is exact and the bookkeeping already supports it.** A fragment's
+`junction_count` is the number of cut bonds incident to it, which is exactly its
+degree in the coarse tree. So assigning a fragment's slots to its incident coarse
+edges is a perfect matching, per fragment, at most 4x4. Then the atom graph
+realises the coarse tree by construction and connectivity cannot fail.
+
+This is the per-coarse-edge formulation R11 set aside because rBRICS breaks it
+(7.7% two-bond edges). R13 then chose BRICS, where 100.00% carry exactly one —
+so it was right to set aside at the time and wrong to leave aside afterwards.
+
+**Two things it also explains.** Generated candidates explain 6.5% of peak
+intensity against 35.4% for true structures, because truncated molecules cannot
+explain evidence. And peak ranking changed top-k not at all, which is expected:
+a reranker cannot find an answer that is not in the candidate set.
+
+**Speed, meanwhile:** fragment-pool embeddings cached (107s -> 2s per run) and the
+composition beam search vectorised (20.5 -> 2.5 ms/molecule, 8x, verified
+behaviour-preserving on identical parameters).
+
+---
+
 ## 2026-09-23 — Method C moves into paper one. Peak explanation separates at d=1.32.
 
 Conservation of composition, computed exactly at fragment level. 300 test

@@ -1290,3 +1290,69 @@ connectivity by maximum-weight spanning tree, composition by budgeted beam.
 `projection_rate` reports the share of molecules for which a feasible assignment
 was found, which is the number that says whether the constraint is satisfiable
 from the model's own candidate ranking or whether it is being forced.
+
+---
+
+## R21 — The bottleneck is assembly, and it has been misattributed since R18
+
+200 test spectra, all constraints on, ranked by frequency.
+
+| | |
+| --- | ---: |
+| **assemblies that come out in one piece** | **0.353** |
+| components per assembly | 2.37 |
+| chosen fragments carry, vs target | -2.27 atoms |
+| **lost during assembly** | **-8.54 atoms** |
+| final molecule, vs target | -10.82 atoms |
+| validity | 0.991 |
+| projection rate | 0.875 |
+
+**79% of the heavy-atom shortfall is mass discarded at assembly, 21% is fragment
+selection.** About 30% of each molecule is thrown away.
+
+`reconstruct_to_rdmol` is called with `get_largest=True`, which keeps only the
+largest connected component, and the following `assert not "." in smi` then
+passes because the dot is already gone. **A broken assembly is recorded as a
+valid molecule.** That is how validity reads 0.991 while top-1 is 0: we have been
+measuring successful truncation as success.
+
+### The mechanism
+
+We enforce that the *coarse* graph is a tree, so every fragment is connected
+there. The atom-level bonds come from Blossom max-weight matching over junction
+slots — and **a matching is not required to realise the coarse tree**. It can
+bond A-B twice and leave A-C unbonded, or pair slots of fragments that are not
+coarse-adjacent. Either way the atom graph falls apart, and the truncation hides
+it.
+
+So the spanning-tree constraint bought connectivity at the coarse level and
+nothing at the atom level, which is where the molecule actually is.
+
+### The fix is available and exact
+
+Every coarse edge must be realised by exactly one atom-level bond. That is
+enforceable, and the bookkeeping already supports it:
+
+**A fragment's `junction_count` is the number of cut bonds incident to it, which
+is exactly its degree in the coarse tree.** So assigning a fragment's junction
+slots to its incident coarse edges is a *perfect matching*, per fragment, on a
+problem of size at most 4x4. Do that for every fragment and the atom graph
+realises the coarse tree by construction — connectivity stops being something to
+hope for and becomes something that cannot fail.
+
+This is the per-coarse-edge formulation R11 considered and set aside because
+rBRICS breaks it: 7.7% of rBRICS coarse edges carry two bonds. **R13 chose
+BRICS, where 100.00% carry exactly one**, so the formulation that was invalid in
+general is valid for the decomposition we actually use. Setting it aside was
+right at the time and wrong once the decomposition was settled.
+
+### Two more things this explains
+
+**Generated candidates explain 6.5% of peak intensity** (best-in-group 27.9%)
+against 35.4% for true structures (R19). Truncated molecules cannot explain the
+evidence, so the conservation law was being asked to rank rubble.
+
+**Peak ranking changed nothing** — top-1 and top-10 identical under frequency and
+peak ranking. Expected: reranking cannot find an answer that is not in the
+candidate set, and with 65% of assemblies broken it usually is not. The reranker
+is not wrong, it is downstream of the failure.
