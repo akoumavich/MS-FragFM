@@ -356,9 +356,7 @@ PATCHES = [
             "degree, and the degree is what makes the valency constraint "
             "expressible at all.  Then node types masked to fragments whose "
             "junction_count equals that degree, then the composition projection "
-            "over what survives.
-
-"
+            "over what survives.  "
             "The valency constraint is the one that matters.  Measured, 85.6% of "
             "nodes get a fragment whose slot count matches their degree -- and a "
             "molecule needs every node to match, so 0.86^7 leaves 38% of "
