@@ -379,6 +379,35 @@ PATCHES = [
                         "jc": self.all_frag_junction_count}, self._frag_z_cache)""",
     ),
     dict(
+        name="fragfm-tree-assembly",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "genererate_utils.py",
+        why=(
+            "Realise the coarse tree at atom level.  Blossom maximises matching "
+            "weight over junction slots and is under no obligation to produce one "
+            "bond per coarse edge, so 64.7% of assemblies came out disconnected "
+            "and get_largest=True discarded the remainder (R21).  Overrides the "
+            "matching result rather than replacing the call, so a failed "
+            "assignment falls back to the released behaviour instead of "
+            "producing something worse."
+        ),
+        marker="msfragfm.assemble",
+        old="""        sel_recon_ae_to_pred_e_type = pred_ae_adj[
+            d.ae_to_pred_index[0], d.ae_to_pred_index[1]
+        ]""",
+        new="""        sel_recon_ae_to_pred_e_type = pred_ae_adj[
+            d.ae_to_pred_index[0], d.ae_to_pred_index[1]
+        ]
+
+        from msfragfm import assemble as _asm
+
+        if _asm.ENABLED:
+            _alt = _asm.assemble_tree(d)
+            if _alt is not None:
+                sel_recon_ae_to_pred_e_type = _alt.to(
+                    sel_recon_ae_to_pred_e_type.dtype
+                )""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(

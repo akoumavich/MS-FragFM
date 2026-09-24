@@ -37,6 +37,7 @@ import torch
 from rdkit import Chem, RDLogger
 from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
+from msfragfm import assemble as _assemble
 from msfragfm import tracking
 from msfragfm.diversity import across_within_ratio, fragment_usage, group_metrics
 from msfragfm.formula_mask import (admissible, fragment_counts, report,
@@ -105,6 +106,8 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--tree-assembly", default="on", choices=["on", "off"],
+                    help="realise one atom-level bond per coarse edge")
     ap.add_argument("--rank", default="frequency", choices=["frequency", "peaks"],
                     help="peaks ranks by explained peak intensity -- the "
                          "conservation law of Method C, applied exactly")
@@ -167,6 +170,7 @@ def main():
     sampler = FragFMGenerator(gcfg)
     sampler.set_seed(args.seed)
     sampler.spanning_tree_decode = args.tree_decode == "on"
+    _assemble.ENABLED = args.tree_assembly == "on"
     sampler.track_components = True
     sampler.component_counts = []
 
@@ -286,6 +290,7 @@ def main():
     if cc.size:
         summary["assembly_components_mean"] = float(cc.mean())
         summary["assembly_connected_frac"] = float((cc == 1).mean())
+    summary["tree_assembly"] = args.tree_assembly
     summary["ranking"] = args.rank
     summary["formula_mask"] = args.formula_mask
     summary["tree_decode"] = args.tree_decode
