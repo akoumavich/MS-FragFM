@@ -233,6 +233,19 @@ def main():
         # only the largest connected component. The gap between the two is
         # therefore mass lost in assembly rather than mass never chosen.
         chosen, cbatch = x[0].cpu().numpy(), x[-1].cpu().numpy()
+        # Does each chosen fragment have as many junction slots as the tree gives
+        # its node edges? For a true decomposition this is definitional; for a
+        # generated molecule the fragment and the edges are chosen independently,
+        # and a mismatch means an incident coarse edge has no slot to attach to.
+        jc_all = sampler.all_frag_junction_count.cpu().numpy()
+        ce_i, ce_t = x[1].cpu().numpy(), x[2].cpu().numpy()
+        deg = np.zeros(cbatch.shape[0])
+        for a, b in ce_i[:, ce_t == 1].T:
+            deg[a] += 1
+            deg[b] += 1
+        slots = jc_all[chosen]
+        valency_ok = float((slots == deg).mean())
+        valency_short = float(np.mean(np.maximum(deg - slots, 0)))
         # Explained peak intensity per candidate, from the generated coarse graph
         # directly -- no re-decomposition needed, the sampler already has it.
         peak_scores = None
@@ -269,6 +282,7 @@ def main():
             if ps is not None:
                 r["explained_peaks_mean"] = float(np.mean(ps))
                 r["explained_peaks_max"] = float(np.max(ps))
+            r["valency_ok"], r["valency_short"] = valency_ok, valency_short
             if intended is not None:
                 sl = slice(j * args.group, (j + 1) * args.group)
                 n_true = Chem.MolFromSmiles(row.smiles).GetNumHeavyAtoms()
@@ -290,6 +304,8 @@ def main():
     if cc.size:
         summary["assembly_components_mean"] = float(cc.mean())
         summary["assembly_connected_frac"] = float((cc == 1).mean())
+    summary["valency_match_frac"] = float(np.mean([r["valency_ok"] for r in rows]))
+    summary["valency_slots_short"] = float(np.mean([r["valency_short"] for r in rows]))
     summary["tree_assembly"] = args.tree_assembly
     summary["ranking"] = args.rank
     summary["formula_mask"] = args.formula_mask
