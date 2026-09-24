@@ -78,6 +78,10 @@ def main():
     ap.add_argument("--bs", type=int, default=256)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--n-peaks", type=int, default=60)
+    ap.add_argument("--frag-mask-dropout", type=float, default=0.25,
+                    help="probability of withholding the guarantee that a "
+                         "molecule's own fragments are selectable. Training had "
+                         "it always; generation has it 74% of the time (R16)")
     ap.add_argument("--warmup", type=int, default=2000,
                     help="FragFM's 10000 was set for MOSES at 6.3k iters/epoch; "
                          "here an epoch is 757 iters, so it would not finish "
@@ -108,6 +112,7 @@ def main():
     cfg.n_iter_done = 0
     cfg.lr = args.lr
     cfg.lr_warmup_iter = args.warmup
+    cfg.frag_mask_dropout = args.frag_mask_dropout
 
     stem = Path(args.data).stem
     ds = {f: make_spectrum_dataset(

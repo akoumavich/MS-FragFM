@@ -230,6 +230,12 @@ def main():
         elif args.cond_mode == "zero":
             cond = torch.zeros_like(cond)
         sampler.cond = cond.repeat_interleave(args.group, dim=0)
+        with torch.no_grad():
+            mem, keep = cond_model.memory(dev)
+        if args.cond_mode == "zero":
+            keep = torch.zeros_like(keep)
+        sampler.cond_mem = mem.repeat_interleave(args.group, dim=0)
+        sampler.cond_keep = keep.repeat_interleave(args.group, dim=0)
 
         if fcounts is not None:
             adm = admissible(fcounts,
@@ -336,7 +342,7 @@ def main():
               f"top1={np.mean([r['top1'] for r in rows]):.4f} "
               f"top1_f={np.mean([r['top1_formula'] for r in rows]):.4f}",
               flush=True)
-        sampler.cond = None
+        sampler.cond = sampler.cond_mem = sampler.cond_keep = None
 
     summary = {k: float(np.mean([r[k] for r in rows])) for k in rows[0]}
     summary["n_spectra"] = len(rows)

@@ -416,6 +416,160 @@ PATCHES = [
             return glob_gen_h_type, gen_e_type, gen_z""",
     ),
     dict(
+        name="fragfm-cross-attention-init",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "model" / "flow.py",
+        why=(
+            "Per-node cross-attention to the spectrum.  R24 measured fragment "
+            "recall at 28.5% against 80%+ teacher-forced, and the conditioning "
+            "arrives as a single pooled vector shared across all ~7 slots and "
+            "distributed only by message passing.  Deciding which fragment a peak "
+            "implies is per-node retrieval, which is what cross-attention is for "
+            "and what Method A specifies.  One block before the backbone rather "
+            "than one per layer: cheaper, and enough to test whether the "
+            "granularity is the problem."
+        ),
+        marker="spectrum_attn",
+        old="""        # fragment bag embedder (optional)""",
+        new="""        if cfg.get("use_spectrum_cond", False):
+            self.spectrum_attn = torch.nn.MultiheadAttention(
+                cfg.embd_h_dim, cfg.backbone_n_head, batch_first=True
+            )
+            self.spectrum_norm = torch.nn.LayerNorm(cfg.embd_h_dim)
+
+        # fragment bag embedder (optional)""",
+    ),
+    dict(
+        name="fragfm-cross-attention-forward",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "model" / "flow.py",
+        why="Second part: attend from node embeddings to the spectrum memory.",
+        marker="cond_mem=None",
+        old="""        coarse_h_valency=None,
+        cond=None,
+    ):""",
+        new="""        coarse_h_valency=None,
+        cond=None,
+        cond_mem=None,
+        cond_keep=None,
+    ):""",
+    ),
+    dict(
+        name="fragfm-cross-attention-apply",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "model" / "flow.py",
+        why=(
+            "Third part: applied after the node features exist and before the "
+            "backbone, so every message-passing layer sees spectrum-informed "
+            "nodes.  Residual, so an untrained attention starts as a no-op."
+        ),
+        marker="self.spectrum_attn(",
+        old="""        # make edge bidirectral
+        e_embd = self.embd_coarse_e(e)""",
+        new="""        if cond_mem is not None and hasattr(self, "spectrum_attn"):
+            # One query per node against its own molecule's spectrum tokens.
+            q = self.spectrum_norm(h_embd).unsqueeze(1)
+            mem = cond_mem[batch]
+            pad = ~cond_keep[batch] if cond_keep is not None else None
+            att, _ = self.spectrum_attn(q, mem, mem, key_padding_mask=pad,
+                                        need_weights=False)
+            h_embd = h_embd + att.squeeze(1)
+
+        # make edge bidirectral
+        e_embd = self.embd_coarse_e(e)""",
+    ),
+    dict(
+        name="trainflow-cond-memory",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "Pass the per-token spectrum memory as well as the pooled vector, so "
+            "the cross-attention block has something to attend to."
+        ),
+        marker="cond_model.memory(",
+        old="""            cond = cond_model(cond_inputs(coarse_graph))
+
+        pred_h_embd, pred_e_logit, pred_z = coarse_gnn(
+            ht_onehot,
+            coarse_graph.full_e_index,
+            et_onehot,
+            zt,
+            coarse_graph.batch,
+            model_t,
+            frag_zs,
+            h_valency,
+            cond=cond,
+        )""",
+        new="""            _ci = cond_inputs(coarse_graph)
+            cond = cond_model(_ci)
+            cond_mem, cond_keep = cond_model.memory(_ci)
+
+        pred_h_embd, pred_e_logit, pred_z = coarse_gnn(
+            ht_onehot,
+            coarse_graph.full_e_index,
+            et_onehot,
+            zt,
+            coarse_graph.batch,
+            model_t,
+            frag_zs,
+            h_valency,
+            cond=cond,
+            cond_mem=cond_mem if cond_model is not None else None,
+            cond_keep=cond_keep if cond_model is not None else None,
+        )""",
+    ),
+    dict(
+        name="trainflow-frag-mask-dropout",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "Training always guarantees the answer is available.  frag_mask is "
+            "base_frags union the molecule's own fragments, so the true fragment "
+            "is selectable at every step; at generation it is available 74% of the "
+            "time (R16).  The model has never had to cope with its absence, which "
+            "is exposure bias with a specific cause.  With probability "
+            "cfg.frag_mask_dropout the guarantee is withheld per molecule, and the "
+            "loss then skips nodes whose target became unselectable -- asking a "
+            "model to predict what it cannot choose would give an infinite CE."
+        ),
+        marker="frag_mask_dropout",
+        old="""        frag_mask = frag_mask.bool() | temp_h_in_batch  # [bs, n_cur_frag]""",
+        new="""        if cfg.get("frag_mask_dropout", 0.0) > 0.0:
+            drop = (torch.rand(bs, device=device) < cfg.frag_mask_dropout)
+            temp_h_in_batch = temp_h_in_batch & ~drop[coarse_graph.batch].unsqueeze(1)
+        frag_mask = frag_mask.bool() | temp_h_in_batch  # [bs, n_cur_frag]""",
+    ),
+    dict(
+        name="trainflow-skip-unreachable-targets",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "Second part: a node whose target was masked out has -inf at the "
+            "target and would contribute infinite cross-entropy, so it is dropped "
+            "from the loss rather than allowed to destroy the gradient."
+        ),
+        marker="reachable = torch.isfinite",
+        old="""        h_loss = F.cross_entropy(pred_h_logit, h_type, reduction="mean")""",
+        new="""        reachable = torch.isfinite(
+            pred_h_logit.gather(1, h_type.unsqueeze(1)).squeeze(1)
+        )
+        if reachable.any():
+            h_loss = F.cross_entropy(
+                pred_h_logit[reachable], h_type[reachable], reduction="mean"
+            )
+        else:
+            h_loss = pred_h_logit.sum() * 0.0""",
+    ),
+    dict(
+        name="fragfm-generator-cond-memory",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "Same cross-attention memory at generation.  Read off the sampler as "
+            "attributes, matching how the pooled vector is already passed."
+        ),
+        marker="cond_mem=getattr(self",
+        old="""                cond=getattr(self, "cond", None),
+            )""",
+        new="""                cond=getattr(self, "cond", None),
+                cond_mem=getattr(self, "cond_mem", None),
+                cond_keep=getattr(self, "cond_keep", None),
+            )""",
+    ),
+    dict(
         name="fragfm-single-lmdb-open",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(

@@ -81,11 +81,52 @@ class SpectrumEncoder(nn.Module):
             nn.Linear(len(ELEMENTS) + 1 + 2, d_model), nn.SiLU(),
             nn.Linear(d_model, d_model),
         )
+        # Per-element tokens for cross-attention: an identity embedding scaled by
+        # the element's count, so "three nitrogens" and "one nitrogen" differ.
+        self.element = nn.Embedding(len(ELEMENTS) + 1, d_model)
+        self.count_scale = nn.Sequential(nn.Linear(1, d_model), nn.Tanh())
+        self.precursor = nn.Linear(2, d_model)
         self.adduct = nn.Embedding(len(ADDUCTS) + 1, d_model)
         self.instrument = nn.Embedding(len(INSTRUMENTS) + 1, d_model)
         self.merge = nn.Sequential(
             nn.Linear(4 * d_model, d_model), nn.SiLU(), nn.Linear(d_model, out_dim)
         )
+
+    def memory(self, batch):
+        """Per-token memory for cross-attention, plus a padding mask.
+
+        Tokens are the peaks, then one per element carrying its count, then the
+        adduct, instrument and precursor.  Method A asks for "each element
+        embedded with its count"; as a token it is attendable per node, which is
+        the point -- deciding which fragment a peak implies is per-node
+        retrieval, and a single pooled vector cannot express it (R24).
+        """
+        mz, inten, mask = batch["mz"], batch["intensity"], batch["peak_mask"]
+        prec = batch["precursor_mz"].unsqueeze(1)
+        feat = torch.cat(
+            [self.mass(mz), self.mass((prec - mz).clamp_min(0.0)), inten.unsqueeze(-1)],
+            dim=-1,
+        )
+        peaks = self.peaks(self.peak_in(feat), src_key_padding_mask=~mask)
+
+        counts = batch["formula"]                                   # [B, E]
+        elem = self.element(torch.arange(counts.size(1), device=counts.device))
+        elem = elem.unsqueeze(0) * self.count_scale(counts.unsqueeze(-1))
+        # An element absent from the formula is masked out rather than zeroed, so
+        # attention cannot spend capacity on it.
+        elem_mask = counts > 0
+
+        extra = torch.stack([
+            self.adduct(batch["adduct"]),
+            self.instrument(batch["instrument"]),
+            self.precursor(torch.stack([batch["precursor_mz"] / 1000.0,
+                                        batch["collision_energy"] / 100.0], -1)),
+        ], dim=1)
+        mem = torch.cat([peaks, elem, extra], dim=1)
+        keep = torch.cat([mask, elem_mask,
+                          torch.ones(mask.size(0), 3, dtype=torch.bool,
+                                     device=mask.device)], dim=1)
+        return mem, keep
 
     def forward(self, batch):
         mz, inten, mask = batch["mz"], batch["intensity"], batch["peak_mask"]
