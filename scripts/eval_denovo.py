@@ -187,7 +187,19 @@ def main():
     sampler.component_counts = []
 
     cond_model = SpectrumEncoder(out_dim=ck["cfg"]["embd_h_dim"]).cuda().eval()
-    cond_model.load_state_dict(ck["ema"]["cond_model"] or ck["cond_model"])
+    # strict=False: the encoder gained per-element and precursor tokens for
+    # cross-attention, so a checkpoint trained before that has no weights for
+    # them. They are unused unless the flow itself has a cross-attention block,
+    # which is gated separately -- but the mismatch would otherwise make every
+    # earlier checkpoint unloadable.
+    miss = cond_model.load_state_dict(
+        ck["ema"]["cond_model"] or ck["cond_model"], strict=False)
+    if miss.missing_keys:
+        print(f"cond_model: {len(miss.missing_keys)} keys absent from the "
+              f"checkpoint ({miss.missing_keys[0]}, ...) -- trained before "
+              f"cross-attention")
+    use_xattn = bool(ck["cfg"].get("use_cross_attention", False))
+    print(f"cross-attention in this checkpoint: {use_xattn}")
 
     # FragFMGenerator already opened the molecule LMDB, and py-lmdb refuses a
     # second open of one environment, so share its handle.
@@ -230,12 +242,13 @@ def main():
         elif args.cond_mode == "zero":
             cond = torch.zeros_like(cond)
         sampler.cond = cond.repeat_interleave(args.group, dim=0)
-        with torch.no_grad():
-            mem, keep = cond_model.memory(dev)
-        if args.cond_mode == "zero":
-            keep = torch.zeros_like(keep)
-        sampler.cond_mem = mem.repeat_interleave(args.group, dim=0)
-        sampler.cond_keep = keep.repeat_interleave(args.group, dim=0)
+        if use_xattn:
+            with torch.no_grad():
+                mem, keep = cond_model.memory(dev)
+            if args.cond_mode == "zero":
+                keep = torch.zeros_like(keep)
+            sampler.cond_mem = mem.repeat_interleave(args.group, dim=0)
+            sampler.cond_keep = keep.repeat_interleave(args.group, dim=0)
 
         if fcounts is not None:
             adm = admissible(fcounts,
