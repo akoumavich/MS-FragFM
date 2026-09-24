@@ -4,6 +4,29 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-24 — Checkpoint tag now follows EXP_NAME, not --cond
+
+`e3b-xattn` crashed at startup: auto-resume found `results/flow_spectrum.pt` --
+the finished 50-epoch run -- because the tag was derived from `--cond`, so every
+spectrum-conditioned arm wrote to the same file regardless of architecture.
+Loading it into the cross-attention model failed on the six missing
+`spectrum_attn` / `spectrum_norm` keys.
+
+The crash is the good outcome. Had the architectures matched, a new arm would
+have silently resumed the old run's weights at epoch 51 and trained 9 more
+epochs, and the result would have looked like a clean 60-epoch run.
+
+Fixed by naming the checkpoint after EXP_NAME, which submit.sh already derives
+from the runai job name and which already keys the wandb run, so job, run and
+checkpoint now share one identity. Strict loading stays: a genuine architecture
+mismatch should be a crash, not a `strict=False` shrug.
+
+Third time this class of fault has landed -- new modules on a class whose weights
+come from an existing checkpoint. The first two were inside the model, and I
+fixed them there; this one was in the file naming, so neither fix covered it.
+
+---
+
 ## 2026-09-24 — Bag size ruled out. Cross-attention and exposure fix built; retraining next.
 
 **Fragment recall is flat in bag size**: 0.2839 at 384, 0.2768 at 1024, 0.2734 at

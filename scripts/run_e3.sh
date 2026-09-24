@@ -9,7 +9,10 @@
 set -euo pipefail
 
 # EXP_NAME names the wandb run; submit.sh defaults it to the runai job name so
-# a run can be traced back to its job and forward from it.
+# a run can be traced back to its job and forward from it.  It also names the
+# checkpoint.  Deriving the tag from --cond instead made arms of different
+# architectures share results/flow_spectrum.pt, and auto-resume tried to load
+# one into the other.
 export EXP_NAME="${EXP_NAME:-flow_${COND:-spectrum}}"
 export WANDB_PROJECT="${WANDB_PROJECT:-MS-FragFM}"
 
@@ -18,5 +21,5 @@ python scripts/train_flow_cond.py \
   --epochs "${EPOCHS:-30}" \
   --bs "${BS:-256}" \
   --lr "${LR:-2e-4}" \
-  --tag "flow_${COND:-spectrum}" \
+  --tag "$EXP_NAME" \
   --resume "${RESUME:-auto}"
