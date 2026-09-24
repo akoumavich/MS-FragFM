@@ -106,6 +106,11 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--n-base-frag", type=int, default=0,
+                    help="override the bag size drawn per Euler step (0 keeps "
+                         "the trained value, 384). R16 measured per-fragment "
+                         "availability at 0.742 with 384, which caps per-fragment "
+                         "accuracy; a wider bag tests whether that cap binds")
     ap.add_argument("--valency", default="on", choices=["on", "off"],
                     help="mask node types to fragments whose junction_count "
                          "equals their degree in the decoded tree")
@@ -174,6 +179,9 @@ def main():
     sampler.set_seed(args.seed)
     sampler.spanning_tree_decode = args.tree_decode == "on"
     sampler.enforce_valency = args.valency == "on"
+    if args.n_base_frag:
+        sampler.fm_cfg.n_base_frag = args.n_base_frag
+        print(f"bag size per step: {args.n_base_frag} (trained with 384)")
     _assemble.ENABLED = args.tree_assembly == "on"
     sampler.track_components = True
     sampler.component_counts = []
@@ -340,6 +348,7 @@ def main():
         summary["assembly_connected_frac"] = float((cc == 1).mean())
     summary["valency_match_frac"] = float(np.mean([r["valency_ok"] for r in rows]))
     summary["valency_slots_short"] = float(np.mean([r["valency_short"] for r in rows]))
+    summary["n_base_frag"] = sampler.fm_cfg.n_base_frag
     summary["valency_constraint"] = args.valency
     summary["tree_assembly"] = args.tree_assembly
     summary["ranking"] = args.rank
