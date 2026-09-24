@@ -185,6 +185,17 @@ def main():
     # second open of one environment, so share its handle.
     env = sampler.test_set.env
     prior = frag_count_prior(env)
+    # True fragment ids per structure, for recall. frag_smi_to_idx maps the
+    # fragment SMILES the decomposition produced onto pool indices.
+    smi2idx = pickle.loads(Path(gcfg.frag_smi_to_idx_fn).read_bytes())
+    true_frags, ds_keys = {}, {}
+    with env.begin() as txn:
+        for k, v in txn.cursor():
+            smp = pickle.loads(v)
+            ids = [smi2idx.get(f) for f in smp["frag_smi_list"]]
+            if all(i is not None for i in ids):
+                true_frags[k] = ids
+                ds_keys[smp["smi"]] = k
     rng = np.random.default_rng(args.seed)
 
     from msfragfm.spectra_data import MassSpecGymSpectra, collate_spectra
@@ -241,6 +252,20 @@ def main():
         # its node edges? For a true decomposition this is definitional; for a
         # generated molecule the fragment and the edges are chosen independently,
         # and a mismatch means an incident coarse edge has no slot to attach to.
+        # Fragment recall against the true multiset. Tanimoto cannot distinguish
+        # "6 of 7 fragments right" from "2 of 7"; those need different fixes, and
+        # top-1 requires all of them, so per-fragment accuracy is the quantity
+        # that says how far off the model actually is.
+        frag_recall = []
+        for n_, m in enumerate(np.unique(cbatch)):
+            key = ds_keys.get(spec_ds.df.iloc[chunk[n_ // args.group]].smiles)
+            if key is None:
+                continue
+            want = Counter(true_frags[key])
+            got = Counter(int(t) for t in chosen[cbatch == m])
+            hit = sum((want & got).values())
+            frag_recall.append(hit / max(sum(want.values()), 1))
+
         jc_all = sampler.all_frag_junction_count.cpu().numpy()
         ce_i, ce_t = x[1].cpu().numpy(), x[2].cpu().numpy()
         deg = np.zeros(cbatch.shape[0])
@@ -287,6 +312,11 @@ def main():
                 r["explained_peaks_mean"] = float(np.mean(ps))
                 r["explained_peaks_max"] = float(np.max(ps))
             r["valency_ok"], r["valency_short"] = valency_ok, valency_short
+            fr = frag_recall[j * args.group:(j + 1) * args.group]
+            if fr:
+                r["fragment_recall_mean"] = float(np.mean(fr))
+                r["fragment_recall_best"] = float(np.max(fr))
+                r["fragment_recall_all"] = float(np.max(fr) >= 1.0)
             if intended is not None:
                 sl = slice(j * args.group, (j + 1) * args.group)
                 n_true = Chem.MolFromSmiles(row.smiles).GetNumHeavyAtoms()

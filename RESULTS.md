@@ -1425,3 +1425,58 @@ sits at 18%. So "0" is not yet a result — it is an absence of resolution. At
 the first evaluation worth running at scale, and it is affordable now: the
 embedding cache and the vectorised projection took a 200-spectrum pass from 318s
 to roughly 156s.
+
+---
+
+## R23 — 2,000 spectra: the pipeline is sound and the model is not
+
+Full constraint stack, 2,000 MassSpecGym test spectra, G=16, 100 steps.
+
+| pipeline | | model | |
+| --- | ---: | --- | ---: |
+| validity | 0.99875 | **top-1** | **0** |
+| assemblies connected | 0.9415 | **top-10** | **0** |
+| valency match | 0.9932 | max Tanimoto to truth | 0.2410 |
+| heavy-atom exact | 0.7443 | formula match | 0.1203 |
+| assembly atom loss | 0.929 | unique per group | 15.90 |
+
+**At n=2,000, top-1 = 0 is a measurement.** It bounds true accuracy below
+**0.15%** at 95%, against a field at 18%. At 200 spectra the same zero bounded
+only below 1.49% and was uninformative; this is not.
+
+Everything mechanical is fixed. Validity 99.9%, connectivity 94%, three quarters
+of molecules with exactly the right heavy-atom count, under one atom lost in
+assembly. None of it made the model better at identifying a structure: Tanimoto
+to truth is 0.2410 here against 0.2405 at 200 spectra before the valency fix.
+
+### What the number implies about per-fragment accuracy
+
+Top-1 requires every fragment correct, so accuracy compounds over ~7 slots:
+
+| per-fragment accuracy | all 7 correct |
+| ---: | ---: |
+| 30% | 0.02% |
+| 37% | 0.09% |
+| 50% | 0.78% |
+| 70% | 8.2% |
+| 80% | 21.0% |
+
+**Top-1 below 0.15% implies per-fragment accuracy below roughly 37% at
+generation.** Teacher-forced fragment perplexity is 1.53, which corresponds to
+80% or better. That gap — 80% teacher-forced against under 37% generated — is the
+finding worth chasing, and it is invisible to Tanimoto, which cannot distinguish
+six fragments right from two.
+
+`fragment_recall` now measures it directly against the true multiset.
+
+### Two notes on reading the rest
+
+`effective_vocab` is 96.7 here against 76.8 at 200 spectra, and
+`fragment_coverage` 0.163 against 0.032. Both scale with the number of spectra
+sampled rather than describing the model, since more spectra touch more of the
+pool. They are comparable across arms at fixed n, not across n.
+
+`projection_rate` fell to 0.75 from 0.85, because the valency constraint narrows
+each slot's candidate set before the composition projection runs, leaving it less
+room to find a feasible sum. That is a real interaction between two constraints
+and worth watching if either is tightened further.
