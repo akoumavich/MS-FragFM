@@ -4,6 +4,42 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-24 — Bag size ruled out. Cross-attention and exposure fix built; retraining next.
+
+**Fragment recall is flat in bag size**: 0.2839 at 384, 0.2768 at 1024, 0.2734 at
+2048. Widening the bag 5.3x changes nothing, so the 74% availability ceiling does
+not bind -- it cannot, with recall at 28.5%. RESULTS.md R25.
+
+That closes the last non-model explanation for the 80%-teacher-forced to
+28.5%-generated gap. Everything remaining is training-side.
+
+**Built, both training-side so one run tests both:**
+
+*Cross-attention.* The encoder now exposes per-token memory -- peaks, one token
+per element carrying its count as Method A specifies, then adduct, instrument and
+precursor -- and the coarse GNN attends to it once before the backbone,
+residually so an untrained attention is a no-op. 25.7M params, 726s/epoch against
+662s.
+
+*Exposure.* `frag_mask` guaranteed the molecule's own fragments were selectable at
+every training step. With probability 0.25 that is now withheld, and the loss
+skips nodes whose target became unselectable, since asking a model to predict what
+it cannot choose gives an infinite cross-entropy.
+
+R25 slightly weakens the second on its own terms: if availability does not bind
+at generation, coping with absence matters less than the argument assumed. Still
+worth testing -- training on a systematically easier task than the real one is a
+defect either way -- but cross-attention is now the stronger hypothesis.
+
+**Two backward-compatibility faults, one caught and one not.** I gated the
+flow-side attention on its own flag so the existing checkpoint would still load,
+then added modules to the encoder and broke loading there instead. The bag sweep
+failed silently because my grep filter matched only the lines I expected, so a
+traceback looked identical to a null result -- the second time that has happened.
+Error patterns now go in the filter.
+
+---
+
 ## 2026-09-24 — Diagnosis complete: 28.5% fragment recall. The model, not the pipeline.
 
 **Fragment recall 28.5% mean, 53.5% best of 16, never all.** The model recovers

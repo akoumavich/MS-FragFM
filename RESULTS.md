@@ -1543,3 +1543,35 @@ absence, which is exposure bias with a specific and fixable cause.
 
 **Neither arm had converged.** Both losses were still falling at epoch 50 at
 about 0.009 per five epochs.
+
+---
+
+## R25 — Bag size does not bind: the model is the whole story
+
+300 test spectra, existing checkpoint, only the generation bag size varied.
+
+| bag per Euler step | fragment recall, mean | best of 16 |
+| ---: | ---: | ---: |
+| 384 (as trained) | 0.2839 | 0.5317 |
+| 1024 | 0.2768 | 0.5228 |
+| 2048 | 0.2734 | 0.5236 |
+
+**Recall is flat, and if anything falls slightly.** Widening the bag 5.3x changes
+nothing, so the 74% per-fragment availability R16 measured is not the binding
+constraint — it cannot be, with recall at 28.5% and the ceiling at 74%. The extra
+candidates are distractors the model does not want, plus a mismatch in the other
+direction since it was trained at 384.
+
+That closes the last non-model explanation. The gap between 80%+ teacher-forced
+and 28.5% generated is the model, and the three remaining candidates are all
+training-side: conditioning delivered as one pooled vector rather than per-node
+attention, a training objective that always guaranteed the answer was selectable,
+and neither arm having converged at 50 epochs. All three are being tested in one
+retraining run.
+
+It also slightly weakens the exposure-bias case on its own terms. If availability
+does not bind at generation, teaching the model to cope with absence matters less
+than the argument for it assumed. It is still worth testing — training on a
+systematically easier task than the real one is a defect regardless of whether
+availability is what surfaces it — but the pooled-vector conditioning is now the
+stronger of the two hypotheses.
