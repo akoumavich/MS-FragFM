@@ -1480,3 +1480,66 @@ pool. They are comparable across arms at fixed n, not across n.
 each slot's candidate set before the composition projection runs, leaving it less
 room to find a feasible sum. That is a real interaction between two constraints
 and worth watching if either is tightened further.
+
+---
+
+## R24 — Fragment recall: the model recovers 2 of 7 fragments, not 6 of 7
+
+300 test spectra, full constraint stack.
+
+| | |
+| --- | ---: |
+| fragment recall, mean over 16 candidates | **0.2849** |
+| fragment recall, best of 16 | **0.5347** |
+| fragment recall, all correct | **0.0** |
+| max Tanimoto to truth | 0.2532 |
+| top-1 / top-10 | 0 |
+
+R23 predicted from top-1 < 0.15% that per-fragment accuracy had to be below
+roughly 37%. Measured: **28.5%**. The prediction holds and the diagnosis is now
+direct rather than inferred.
+
+**The signal is real but the gap is large.** Random selection from a
+384-fragment bag would recover 0.26%, so 28.5% is 109x random — the model has
+learned something substantial. Teacher-forced perplexity of 1.53 implies 80% or
+better. The model recovers about **2 of 7 fragments**, not 6 of 7, so this is a
+substantial failure rather than a near miss, and no amount of better assembly or
+reranking reaches top-1 from here.
+
+This is what Tanimoto could not show. 0.2532 is consistent with either "nearly
+right" or "mostly wrong", and the answer is mostly wrong.
+
+### The most useful number here is the spread
+
+Mean recall 28.5%, best-of-16 **53.5%**. The group collectively holds nearly twice
+as much of the answer as its average member. Two things follow.
+
+**A fragment-level scorer over the group could assemble something better than any
+single sample contains.** That is test-time search at the fragment level rather
+than the molecule level, and the representation is what makes it expressible —
+which is the Method A argument again, from a new direction. The R19 peak
+explanation is an oracle-free scorer already in hand.
+
+**It also bears on the C2 claim.** Structured credit assignment presupposes that
+per-fragment signal is informative about which fragments to change, and a mean of
+0.285 against a best of 0.535 says the variation across a group is exactly where
+that signal would act.
+
+### Why the gap, in order of what I would test
+
+**Conditioning arrives as one pooled vector.** Method A specifies the formula
+embedded per element and injected by cross-attention; we deliver formula and
+peaks as a single 256-dimensional global vector added to `g_embd`, shared across
+all seven slots and distributed only by message passing. Identifying which
+fragment a peak implies is a per-node retrieval problem, and cross-attention is
+the mechanism for it. This is the deviation flagged in R20, now with a measured
+cost.
+
+**Training never shows the model a missing answer.** In `process_single_epoch`,
+`frag_mask` always includes the molecule's own fragments, so the true fragment is
+guaranteed present in the candidate set at every training step. At generation it
+is present 74% of the time (R16). The model has never had to cope with its
+absence, which is exposure bias with a specific and fixable cause.
+
+**Neither arm had converged.** Both losses were still falling at epoch 50 at
+about 0.009 per five epochs.

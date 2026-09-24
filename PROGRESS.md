@@ -4,6 +4,51 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-24 — Diagnosis complete: 28.5% fragment recall. The model, not the pipeline.
+
+**Fragment recall 28.5% mean, 53.5% best of 16, never all.** The model recovers
+about 2 of 7 fragments. RESULTS.md R23, R24.
+
+At n=2,000 top-1 = 0 became a measurement rather than an absence of resolution:
+true accuracy below 0.15% at 95%. R23 predicted from that per-fragment accuracy
+must be below ~37%; measured 28.5%, so the inference chain closes.
+
+The signal is real -- 109x random selection from a 384-fragment bag -- and the gap
+is large: teacher-forced perplexity 1.53 implies 80%+. Two of seven, not six of
+seven, so no improvement to assembly or reranking reaches top-1 from here.
+
+Tanimoto could not have told us this. 0.253 is consistent with "nearly right" and
+with "mostly wrong", and it is mostly wrong. Worth remembering for the paper: the
+benchmark's own similarity metrics hide the distinction that matters.
+
+**The pipeline work is done and was worth doing.** Validity 99.9%, connectivity
+94%, heavy-atom exact 74%, under one atom lost in assembly -- from a starting
+point where 65% of molecules were being silently truncated. But none of it moved
+structure identification, and I should say plainly that four of the five fixes
+since R18 addressed symptoms of one mechanical fault.
+
+**The most useful number is the spread.** Mean 28.5% against best-of-16 53.5%:
+the group holds nearly twice as much of the answer as its average member. That
+argues for fragment-level test-time search -- a scorer over the group assembling
+something no single sample contains -- and the R19 peak explanation is an
+oracle-free scorer already in hand. It also bears on C2, since structured credit
+assignment acts precisely on that within-group variation.
+
+**Three candidates for the gap, in the order I would test them:**
+
+1. **Conditioning is one pooled vector.** Method A specifies per-element
+   embedding injected by cross-attention; we deliver formula and peaks as a single
+   256-d global vector shared across all seven slots. Identifying which fragment a
+   peak implies is per-node retrieval, which is what cross-attention is for. R20
+   flagged the deviation; it now has a measured cost.
+2. **Training never shows a missing answer.** `frag_mask` always includes the
+   molecule's own fragments, so the true fragment is guaranteed available at every
+   training step. At generation it is available 74% of the time. Exposure bias
+   with a specific, fixable cause.
+3. **Neither arm converged** -- both losses still falling at epoch 50.
+
+---
+
 ## 2026-09-24 — Valency constraint lands. Pipeline mechanically sound; model quality is next.
 
 **Connectivity 38% to 93%, assembly atom loss 8.17 to 1.04, exact heavy-atom
