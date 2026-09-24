@@ -78,6 +78,9 @@ def main():
     ap.add_argument("--bs", type=int, default=256)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--n-peaks", type=int, default=60)
+    ap.add_argument("--cross-attention", default="on", choices=["on", "off"],
+                    help="per-node attention to the spectrum tokens, as Method A "
+                         "specifies, instead of one pooled vector for all slots")
     ap.add_argument("--frag-mask-dropout", type=float, default=0.25,
                     help="probability of withholding the guarantee that a "
                          "molecule's own fragments are selectable. Training had "
@@ -113,6 +116,8 @@ def main():
     cfg.lr = args.lr
     cfg.lr_warmup_iter = args.warmup
     cfg.frag_mask_dropout = args.frag_mask_dropout
+    cfg.use_cross_attention = (args.cond == "spectrum"
+                               and args.cross_attention == "on")
 
     stem = Path(args.data).stem
     ds = {f: make_spectrum_dataset(

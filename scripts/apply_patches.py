@@ -426,11 +426,15 @@ PATCHES = [
             "implies is per-node retrieval, which is what cross-attention is for "
             "and what Method A specifies.  One block before the backbone rather "
             "than one per layer: cheaper, and enough to test whether the "
-            "granularity is the problem."
+            "granularity is the problem.  Gated on its own flag rather than "
+            "use_spectrum_cond, which the existing checkpoint already has set "
+            "-- sharing the flag would create these parameters when loading it "
+            "and fail on missing keys, and it also keeps the two conditioning "
+            "mechanisms independently ablatable."
         ),
         marker="spectrum_attn",
         old="""        # fragment bag embedder (optional)""",
-        new="""        if cfg.get("use_spectrum_cond", False):
+        new="""        if cfg.get("use_cross_attention", False):
             self.spectrum_attn = torch.nn.MultiheadAttention(
                 cfg.embd_h_dim, cfg.backbone_n_head, batch_first=True
             )
