@@ -234,66 +234,6 @@ PATCHES = [
                 )""",
     ),
     dict(
-        name="fragfm-spanning-tree-decode",
-        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
-        why=(
-            "A BRICS coarse graph is always a tree (2,000/2,000 measured), so "
-            "project the final coarse-edge prediction onto a max-weight spanning "
-            "tree instead of thresholding each edge independently.  Same pattern "
-            "the codebase already uses for attachment -- local scores, global "
-            "combinatorial projection -- one level up.  pred_e1_prob has already "
-            "been resampled to a one-hot by this point, so the scores come from "
-            "pred_e_logit."
-        ),
-        marker="spanning_tree_decode",
-        old="""        if is_last:
-            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
-            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]
-            gen_e_type = torch.argmax(pred_e1_prob, dim=1)
-            gen_z = pred_z
-            return glob_gen_h_type, gen_e_type, gen_z""",
-        new="""        if is_last:
-            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
-            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]
-            gen_e_type = torch.argmax(pred_e1_prob, dim=1)
-            if getattr(self, "spanning_tree_decode", False):
-                from msfragfm.spanning_tree import max_weight_spanning_tree
-
-                bond_p = torch.softmax(pred_e_logit, dim=1)[:, 1]
-                gen_e_type = max_weight_spanning_tree(
-                    bond_p, full_e_index, batch
-                ).long()
-            gen_z = pred_z
-            return glob_gen_h_type, gen_e_type, gen_z""",
-    ),
-    dict(
-        name="fragfm-composition-projection",
-        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
-        why=(
-            "Project the final fragment assignment onto sum(counts) == formula. "
-            "R18/R20: the bag offers fragments averaging 9.52 heavy atoms and the "
-            "true answer needs 4.15, so availability is not the constraint -- the "
-            "model selects 1.20 atoms/fragment below truth, which over ~7 slots is "
-            "the measured 6.97-atom shortfall.  The formula fixes the answer "
-            "exactly before generation starts, so this is a support constraint, "
-            "the third after attachment matching and the spanning tree."
-        ),
-        marker="composition_targets",
-        old="""            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
-            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]""",
-        new="""            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
-            targets = getattr(self, "composition_targets", None)
-            if targets is not None:
-                from msfragfm.composition import project_batch
-
-                gen_h_type, frac = project_batch(
-                    pred_h_logit[:, :n_cur_frag], batch,
-                    cur_frag_idxs[:n_cur_frag], self.composition_counts, targets,
-                )
-                self.last_projection_rate = frac
-            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]""",
-    ),
-    dict(
         name="fragfm-track-components",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(
@@ -406,6 +346,76 @@ PATCHES = [
                 sel_recon_ae_to_pred_e_type = _alt.to(
                     sel_recon_ae_to_pred_e_type.dtype
                 )""",
+    ),
+    dict(
+        name="fragfm-constrained-final-step",
+        path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
+        why=(
+            "Three exact constraints at the last Euler step, in the only order "
+            "that works.  Edges first: the spanning tree fixes each node's "
+            "degree, and the degree is what makes the valency constraint "
+            "expressible at all.  Then node types masked to fragments whose "
+            "junction_count equals that degree, then the composition projection "
+            "over what survives.
+
+"
+            "The valency constraint is the one that matters.  Measured, 85.6% of "
+            "nodes get a fragment whose slot count matches their degree -- and a "
+            "molecule needs every node to match, so 0.86^7 leaves 38% of "
+            "molecules connected, which is exactly the 0.384 observed.  A 14% "
+            "per-node error compounding over 7 nodes is a 62% molecule-level "
+            "failure.  FragFM computes this mismatch as a feature "
+            "(h_valency = h_degree - h_junction_count) and never constrains it."
+        ),
+        marker="enforce_valency",
+        old="""        if is_last:
+            gen_h_type = torch.argmax(pred_h1_prob, dim=1)
+            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]
+            gen_e_type = torch.argmax(pred_e1_prob, dim=1)
+            gen_z = pred_z
+            return glob_gen_h_type, gen_e_type, gen_z""",
+        new="""        if is_last:
+            # Edges first: the tree fixes each node's degree, and the degree is
+            # what the valency constraint on node types is stated against.
+            gen_e_type = torch.argmax(pred_e1_prob, dim=1)
+            if getattr(self, "spanning_tree_decode", False):
+                from msfragfm.spanning_tree import max_weight_spanning_tree
+
+                bond_p = torch.softmax(pred_e_logit, dim=1)[:, 1]
+                gen_e_type = max_weight_spanning_tree(
+                    bond_p, full_e_index, batch
+                ).long()
+
+            node_logit = pred_h_logit[:, :n_cur_frag].clone()
+            if getattr(self, "enforce_valency", False):
+                deg = torch.zeros(node_logit.size(0), device=device)
+                sel = full_e_index[:, gen_e_type == 1]
+                ones = torch.ones(sel.size(1), device=device)
+                deg.index_add_(0, sel[0], ones)
+                deg.index_add_(0, sel[1], ones)
+                cand_jc = self.all_frag_junction_count.to(device)[
+                    cur_frag_idxs[:n_cur_frag]
+                ].float()
+                ok = cand_jc.unsqueeze(0) == deg.unsqueeze(1)
+                # A node with no matching candidate keeps its unconstrained
+                # options: all -inf would give a NaN softmax downstream.
+                keep = ok.any(dim=1, keepdim=True)
+                node_logit = node_logit.masked_fill(keep & ~ok, float("-inf"))
+
+            gen_h_type = torch.argmax(node_logit, dim=1)
+            targets = getattr(self, "composition_targets", None)
+            if targets is not None:
+                from msfragfm.composition import project_batch
+
+                gen_h_type, frac = project_batch(
+                    node_logit, batch, cur_frag_idxs[:n_cur_frag],
+                    self.composition_counts, targets,
+                )
+                self.last_projection_rate = frac
+
+            glob_gen_h_type = cur_frag_idxs.to(device)[gen_h_type]
+            gen_z = pred_z
+            return glob_gen_h_type, gen_e_type, gen_z""",
     ),
     dict(
         name="fragfm-single-lmdb-open",
