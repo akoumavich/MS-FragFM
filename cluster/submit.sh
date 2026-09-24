@@ -24,6 +24,12 @@ MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' runai submit "$NAME" \
   -e TORCHINDUCTOR_CACHE_DIR=/scratch/home/akoum/.cache/torchinductor \
   -e COND="${COND:-}" -e EPOCHS="${EPOCHS:-}" -e BS="${BS:-}" -e LR="${LR:-}" \
   -e RESUME="${RESUME:-auto}" \
+  -e N_SPECTRA="${N_SPECTRA:-}" -e GROUP="${GROUP:-}" -e STEPS="${STEPS:-}" \
+  -e SPECTRA_PER_BATCH="${SPECTRA_PER_BATCH:-}" -e TAG="${TAG:-}" \
+  -e FORMULA_MASK="${FORMULA_MASK:-}" -e TREE_DECODE="${TREE_DECODE:-}" \
+  -e VALENCY="${VALENCY:-}" -e TREE_ASSEMBLY="${TREE_ASSEMBLY:-}" \
+  -e COMPOSITION="${COMPOSITION:-}" -e RANK="${RANK:-}" \
+  -e COND_MODE="${COND_MODE:-}" \
   -e EXP_NAME="${EXP_NAME:-$NAME}" -e WANDB_PROJECT="${WANDB_PROJECT:-MS-FragFM}" \
   -e WANDB_DIR=/scratch/home/akoum/.cache/wandb \
   -e MSFRAGFM_DATA=/scratch/home/akoum/data/msfragfm \
