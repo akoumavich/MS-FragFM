@@ -106,6 +106,9 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--valency", default="on", choices=["on", "off"],
+                    help="mask node types to fragments whose junction_count "
+                         "equals their degree in the decoded tree")
     ap.add_argument("--tree-assembly", default="on", choices=["on", "off"],
                     help="realise one atom-level bond per coarse edge")
     ap.add_argument("--rank", default="frequency", choices=["frequency", "peaks"],
@@ -170,6 +173,7 @@ def main():
     sampler = FragFMGenerator(gcfg)
     sampler.set_seed(args.seed)
     sampler.spanning_tree_decode = args.tree_decode == "on"
+    sampler.enforce_valency = args.valency == "on"
     _assemble.ENABLED = args.tree_assembly == "on"
     sampler.track_components = True
     sampler.component_counts = []
@@ -306,6 +310,7 @@ def main():
         summary["assembly_connected_frac"] = float((cc == 1).mean())
     summary["valency_match_frac"] = float(np.mean([r["valency_ok"] for r in rows]))
     summary["valency_slots_short"] = float(np.mean([r["valency_short"] for r in rows]))
+    summary["valency_constraint"] = args.valency
     summary["tree_assembly"] = args.tree_assembly
     summary["ranking"] = args.rank
     summary["formula_mask"] = args.formula_mask
