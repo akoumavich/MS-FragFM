@@ -4,6 +4,56 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-24 — Valency constraint lands. Pipeline mechanically sound; model quality is next.
+
+**Connectivity 38% to 93%, assembly atom loss 8.17 to 1.04, exact heavy-atom
+count 26% to 74%, validity 99.94%.** RESULTS.md R22.
+
+The prediction held exactly: a 14% per-node valency mismatch was compounding over
+~7 nodes into a 62% molecule-level failure, and enforcing `junction_count ==
+degree_tree(v)` in the support closed it. FragFM computed that mismatch as an
+input feature all along and never constrained it.
+
+The heavy-atom shortfall has changed hands. Assembly was 79% of it and is now
+26%; fragment selection at -2.97 atoms is the dominant residual.
+
+A detail I did not expect: constraining the choice made the model use a **wider**
+fragment range, not narrower -- effective vocabulary 72.0 to 76.8 -- because the
+valency requirement pushes it off the small common fragments R20 found it
+defaulting to.
+
+**The residual 6.7% disconnection is a bag problem.** 0.77% of nodes still take a
+wrong-valency fragment because none with the right valency was in the drawn
+384-fragment bag, and the guard keeps their unconstrained options rather than
+producing a NaN softmax. Drawing the bag with required valencies in mind is the
+fix -- the spectrum-conditioned bag arriving from a third direction.
+
+**What has not moved is the point.** Tanimoto to truth changed by 0.0006.
+Everything fixed since R18 was mechanical: the pipeline was destroying its own
+output and has stopped. None of it made the model better at identifying a
+structure. Four support constraints and what each bought:
+
+| constraint | bought |
+| --- | --- |
+| formula containment | 55% of pool pruned; almost nothing downstream |
+| spanning-tree coarse decode | validity 93% -> 99.5% |
+| composition projection | formula match 6.9x, exact count 5.9x |
+| **fragment valency** | **connectivity 38% -> 93%, assembly loss 8x** |
+
+**Top-1 is not yet measurable.** Zero in 200 spectra bounds true accuracy below
+1.49% at 95%, against a field at 18%. At 2,000 it bounds below 0.15%, which would
+be informative. That is the first evaluation worth running at scale, and the
+caching plus vectorisation make it affordable.
+
+**After that, three candidates for model quality, in order of expected value:**
+formula conditioning by cross-attention as Method A specifies rather than one
+component of a global vector (R20 flagged the deviation and it now has a measured
+cost); more training, since neither arm had converged at epoch 50; and the
+attachment latent of R7-R11, which decides *which atoms* bond rather than which
+fragments, and is now isolated from the connectivity failure that was masking it.
+
+---
+
 ## 2026-09-23 — The bottleneck is atom-level assembly. Four hypotheses retracted.
 
 **Only 35.3% of assemblies come out in one piece**, 2.37 components on average,

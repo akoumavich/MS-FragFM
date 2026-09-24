@@ -1356,3 +1356,72 @@ evidence, so the conservation law was being asked to rank rubble.
 peak ranking. Expected: reranking cannot find an answer that is not in the
 candidate set, and with 65% of assemblies broken it usually is not. The reranker
 is not wrong, it is downstream of the failure.
+
+---
+
+## R22 — Valency in the support: the pipeline is now mechanically sound
+
+200 test spectra, paired, everything else fixed.
+
+| | valency off | **valency on** |
+| --- | ---: | ---: |
+| assemblies connected | 0.3836 | **0.9334** |
+| components per assembly | 2.33 | 1.36 |
+| per-node valency match | 0.8559 | 0.9923 |
+| **assembly atom loss** | 8.17 | **1.04** |
+| validity | 0.9906 | **0.9994** |
+| formula match | 0.0530 | **0.1124** |
+| heavy-atom exact | 0.2615 | **0.7356** |
+| heavy-atom signed error | -10.45 | **-4.00** |
+| intended heavy error (selection) | -2.28 | -2.97 |
+| max Tanimoto to truth | 0.2405 | 0.2411 |
+| top-1 / top-10 | 0 | 0 |
+
+**Connectivity 38% to 93%, assembly loss 8.17 to 1.04 atoms, exact heavy-atom
+count 26% to 74%.** The prediction was that closing a 14% per-node valency
+mismatch would fix a 62% molecule-level failure, and it did.
+
+The shortfall has changed hands. Assembly was 79% of the heavy-atom error and is
+now 26%; fragment *selection* at -2.97 is the dominant residual. Selection got
+marginally worse, which is the expected cost of constraining the choice: a node
+forced to a matching valency sometimes takes a smaller fragment than it wanted.
+
+One counter-intuitive detail worth keeping. Constraining the choice made the
+model use a **wider** fragment range, not a narrower one — effective vocabulary
+72.0 to 76.8, entropy 4.28 to 4.34 — because the valency requirement pushes it
+off the small common fragments R20 found it defaulting to.
+
+### The residual 6.7% is a bag problem, not a model problem
+
+Per-node match is 0.9923 rather than 1.0 because of the guard: a node with no
+matching candidate in the current 384-fragment bag keeps its unconstrained
+options, since all-`-inf` logits give a NaN softmax. So 0.77% of nodes still take
+a wrong-valency fragment for want of a right-valency one on offer. The fix is
+drawing the bag with the required valencies in mind — which is the
+spectrum-conditioned bag arriving from a third direction.
+
+### What has not moved, and why that is the real problem
+
+**Tanimoto to truth changed by 0.0006.** The molecules are now well-formed,
+connected and correctly sized, and no closer to the right answer than before.
+Everything fixed since R18 was mechanical: the pipeline was destroying its own
+output, and it has stopped. None of it made the model better at identifying a
+structure.
+
+Four constraints in the support, and what each bought:
+
+| constraint | bought |
+| --- | --- |
+| formula containment | 55% of the pool pruned; almost nothing downstream |
+| spanning-tree coarse decode | validity 93% to 99.5%; connectivity at the coarse level only |
+| composition projection | formula match 6.9x, exact count 5.9x |
+| **fragment valency** | **connectivity 38% to 93%, assembly loss 8x** |
+
+### Top-1 is unmeasurable at this sample size
+
+Zero hits in 200 spectra bounds true top-1 below **1.49%** at 95%, and the field
+sits at 18%. So "0" is not yet a result — it is an absence of resolution. At
+2,000 spectra the bound tightens to 0.15%, which would be informative. That is
+the first evaluation worth running at scale, and it is affordable now: the
+embedding cache and the vectorised projection took a 200-spectrum pass from 318s
+to roughly 156s.
