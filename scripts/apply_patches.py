@@ -559,6 +559,115 @@ PATCHES = [
             h_loss = pred_h_logit.sum() * 0.0""",
     ),
     dict(
+        name="trainflow-rl-signature",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "Let process_single_epoch train on the policy's own states.  R25-R31 "
+            "closed every other explanation for 33% generated against 80% "
+            "teacher-forced per-fragment accuracy; what is left is that "
+            "corruption from the truth never produces a state where an earlier "
+            "slot holds a wrong fragment, which is most of a rollout.  One dict "
+            "carries the rollout in and the per-node tensors out, so the return "
+            "type is unchanged and every other caller is unaffected."
+        ),
+        marker="rl=None,",
+        old="""    frag_occurance_source="train",
+    optimizer=None,
+    cond_model=None,
+):""",
+        new="""    frag_occurance_source="train",
+    optimizer=None,
+    cond_model=None,
+    rl=None,
+):""",
+    ),
+    dict(
+        name="trainflow-rl-bag",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "The bag is built from the batch's true fragments plus the occurrence "
+            "draw, so a rollout fragment outside it has no column to occupy and "
+            "searchsorted would map it to a neighbour silently.  Union the "
+            "rollout's fragments in."
+        ),
+        marker='torch.cat([exst_frag_idxs, rl[',
+        old="""        exst_frag_idxs = torch.unique(coarse_graph.h)
+        cur_frag_idxs = torch.unique(torch.cat([base_frag_idxs, exst_frag_idxs], dim=0))""",
+        new="""        exst_frag_idxs = torch.unique(coarse_graph.h)
+        if rl is not None and rl.get("state_h") is not None:
+            exst_frag_idxs = torch.unique(
+                torch.cat([exst_frag_idxs, rl["state_h"].to(device)], dim=0)
+            )
+        cur_frag_idxs = torch.unique(torch.cat([base_frag_idxs, exst_frag_idxs], dim=0))""",
+    ),
+    dict(
+        name="trainflow-rl-state",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "The corrupted state is built from the rollout rather than the truth, "
+            "while the cross-entropy target below stays the truth.  That is the "
+            "whole of self-conditioning: the unmasked slots hold what the policy "
+            "actually committed to, so the model learns to recover from its own "
+            "errors instead of only from masks."
+        ),
+        marker="rl-substituted state",
+        old="""            h_prior_type = torch.ones(n_node).to(device).long() * n_cur_frag
+            ht_type = h_type.clone()""",
+        new="""            h_prior_type = torch.ones(n_node).to(device).long() * n_cur_frag
+            # rl-substituted state: the policy's own committed fragments
+            if rl is not None and rl.get("state_h") is not None:
+                ht_type = torch.searchsorted(
+                    cur_frag_idxs, rl["state_h"].to(device)
+                ).clone()
+            else:
+                ht_type = h_type.clone()""",
+    ),
+    dict(
+        name="trainflow-rl-loss",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "Per-sample weights on the fragment-type loss, and the per-node "
+            "tensors handed back for the group-relative objectives.  Only the "
+            "fragment head is reweighted: the reward is fragment recall, so that "
+            "is the head any arm is trying to move, and weighting the edge and "
+            "latent losses by it would claim a credit assignment the reward does "
+            "not support."
+        ),
+        marker='rl["out"] =',
+        old="""        reachable = torch.isfinite(
+            pred_h_logit.gather(1, h_type.unsqueeze(1)).squeeze(1)
+        )
+        if reachable.any():
+            h_loss = F.cross_entropy(
+                pred_h_logit[reachable], h_type[reachable], reduction="mean"
+            )
+        else:
+            h_loss = pred_h_logit.sum() * 0.0""",
+        new="""        reachable = torch.isfinite(
+            pred_h_logit.gather(1, h_type.unsqueeze(1)).squeeze(1)
+        )
+        if rl is not None:
+            rl["out"] = {
+                "h_logit": pred_h_logit,
+                "h_type": h_type,
+                "reachable": reachable,
+                "batch": coarse_graph.batch,
+                "crpt_h_mask": crpt_h_mask,
+            }
+        if rl is not None and rl.get("weight") is not None:
+            w = rl["weight"].to(device)[coarse_graph.batch][reachable]
+            ce = F.cross_entropy(
+                pred_h_logit[reachable], h_type[reachable], reduction="none"
+            )
+            h_loss = (ce * w).sum() / w.sum().clamp_min(1e-6)
+        elif reachable.any():
+            h_loss = F.cross_entropy(
+                pred_h_logit[reachable], h_type[reachable], reduction="mean"
+            )
+        else:
+            h_loss = pred_h_logit.sum() * 0.0""",
+    ),
+    dict(
         name="fragfm-generator-cond-memory",
         path=THIRD_PARTY / "FragFM" / "fragfm" / "mol_generator.py",
         why=(
