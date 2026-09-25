@@ -659,7 +659,9 @@ PATCHES = [
             ce = F.cross_entropy(
                 pred_h_logit[reachable], h_type[reachable], reduction="none"
             )
-            h_loss = (ce * w).sum() / w.sum().clamp_min(1e-6)
+            # abs, because GRPO's advantages are signed: the plain sum can sit at
+            # zero by construction and would either explode the loss or flip it.
+            h_loss = (ce * w).sum() / w.abs().sum().clamp_min(1e-6)
         elif reachable.any():
             h_loss = F.cross_entropy(
                 pred_h_logit[reachable], h_type[reachable], reduction="mean"

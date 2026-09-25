@@ -120,18 +120,26 @@ def cond_inputs(coarse_graph):
 
 
 def make_spectrum_dataset(lmdb_fn, frag_lmdb_fn, frag_smi_to_idx_fn, fold,
-                          n_peaks=60):
+                          n_peaks=60, base=None):
     """FragFMDataset indexed by spectrum instead of by structure.
 
     One structure carries many spectra, so `keys` is rewritten to one entry per
     spectrum; the parent class then loads the right molecule for each.
+
+    `base` adopts an already-open FragFMDataset instead of constructing one, for
+    the case where a FragFMGenerator has opened the same environments -- py-lmdb
+    refuses a second open of one environment, and the generator's own dataset is
+    already built on the fragment-bag split.
     """
     from fragfm.dataset import FragFMDataset
 
     class SpectrumConditioned(FragFMDataset):
         def __init__(self):
-            super().__init__(lmdb_fn, frag_lmdb_fn, frag_smi_to_idx_fn,
-                             data_split=FOLD_TO_PREFIX[fold], debug=False)
+            if base is None:
+                super().__init__(lmdb_fn, frag_lmdb_fn, frag_smi_to_idx_fn,
+                                 data_split=FOLD_TO_PREFIX[fold], debug=False)
+            else:
+                self.__dict__.update(base.__dict__)
             spec = MassSpecGymSpectra(self.env, fold=fold, n_peaks=n_peaks)
             smi_to_key = {}
             with self.env.begin() as txn:
@@ -159,6 +167,10 @@ def make_spectrum_dataset(lmdb_fn, frag_lmdb_fn, frag_smi_to_idx_fn, fold,
             coarse.collision_energy = s["collision_energy"].view(1)
             coarse.adduct = s["adduct"].view(1)
             coarse.instrument = s["instrument"].view(1)
+            # Which dataset row this is, so a caller can recover the structure
+            # key -- the RL reward needs the true fragment multiset per sample and
+            # the loader does not pass indices.
+            coarse.ds_idx = torch.tensor([i])
             return graph, coarse
 
     return SpectrumConditioned()
