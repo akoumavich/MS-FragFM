@@ -1715,3 +1715,62 @@ from the spectrum and formula rather than sampling it from a marginal -- the
 spectrum constrains the fragment count directly through the number of distinct
 cleavage series, which is exactly the kind of thing the peaks are informative
 about.
+
+---
+
+## R28 — The fragment count is right 10% of the time, and fixing it is worth 7 points
+
+300 test spectra, `e3b-xattn`, full constraint stack. `n_frag_lookup_miss` is 0 in
+both arms, so the oracle resolved every structure.
+
+| | drawn | oracle |
+| --- | ---: | ---: |
+| n_frag exact | **0.0998** | 1.0 |
+| n_frag absolute error | **4.225** | 0 |
+| n_frag signed error | -0.938 | 0 |
+| fragment recall, mean | 0.2850 | **0.3566** |
+| fragment recall, best of 16 | 0.5400 | 0.5177 |
+| heavy-atom signed error | -3.412 | -2.043 |
+| heavy-atom exact | 0.7646 | 0.8315 |
+| within-group Tanimoto | 0.1525 | 0.1806 |
+| top-1 | 0 | 0 |
+
+**The count handed to generation is right 10% of the time and off by 4.2 fragments
+on molecules that have about 7.** Giving it away for free is worth 7.2 points of
+fragment recall, a quarter of the current figure, and it confirms R27's mechanism:
+within-group Tanimoto rises from 0.153 to 0.181 once the candidates stop
+disagreeing about how many fragments the molecule has.
+
+Best-of-16 *falls*, 0.540 to 0.518. With 16 different counts the group was buying
+lottery tickets on the count, and the best ticket beat a group that all agree.
+That is worth remembering when reading any best-of-k on this task.
+
+### The prior is fine; sampling it is the mistake
+
+Absolute error 4.23 against signed error -0.94 says p(n_frag | n_heavy) is roughly
+centred on the truth and very wide. Drawing from it 16 times inherits the full
+width. The conditional median minimises absolute error by construction, and
+covering the conditional distribution at even quantiles hedges the same range
+deterministically, without paying the variance of sampling it.
+
+So `--n-frag` now selects among four strategies, none of which changes the model:
+
+| | |
+| --- | --- |
+| `sample` | 16 iid draws; every number in this project so far |
+| `median` | the conditional median for all 16 |
+| `spread` | 16 even quantiles of the conditional pool |
+| `oracle` | the true count; the bound, not a method |
+
+`median` and `spread` bracket the two honest readings. If the group should commit,
+`median` wins; if the count is genuinely uncertain and worth hedging, `spread`
+wins, and it should beat `sample` either way because stratified coverage of a
+distribution beats sampling it.
+
+### What this does not fix
+
+With a perfect count, per-fragment accuracy is 35.7%. Compounded over 7 slots that
+is 0.07% for all-correct, still under R23's 0.15% bound, and still far from the 80%
+that teacher-forced loss implies. The count is the largest single effect measured
+so far and it closes about a sixth of the gap. The rest is fragment identity at
+generation-time states, which no sampler or count strategy will reach.

@@ -94,12 +94,35 @@ def frag_count_prior(env):
     return prior, true_n
 
 
-def draw_n_frag(prior, n_heavy, rng):
+def frag_count_pool(prior, n_heavy):
     for d in (0, 1, 2, 3, 5, 8):  # widen the window until the bucket is populated
         pool = [v for k in range(n_heavy - d, n_heavy + d + 1) for v in prior.get(k, [])]
         if len(pool) >= 20:
-            return int(rng.choice(pool))
-    return max(2, round(n_heavy / 4))
+            return pool
+    return []
+
+
+def frag_counts_for_group(prior, n_heavy, rng, mode, group, n_true):
+    """The n_frag handed to each candidate in one spectrum's group.
+
+    R28 measures `sample` -- 16 iid draws from p(n_frag | n_heavy) -- at 10%
+    exact and 4.2 fragments of absolute error, while the signed error is only
+    -0.94. So the prior is roughly centred and sampling it is what throws the
+    accuracy away. `median` minimises absolute error instead; `spread` covers the
+    same conditional distribution at even quantiles, hedging over the count
+    without paying the variance of drawing it 16 times. `oracle` is the bound.
+    """
+    if mode == "oracle" and n_true is not None:
+        return [n_true] * group
+    pool = frag_count_pool(prior, n_heavy)
+    if not pool:
+        return [max(2, round(n_heavy / 4))] * group
+    if mode == "median":
+        return [int(np.median(pool))] * group
+    if mode == "spread":
+        qs = np.quantile(pool, np.linspace(0.05, 0.95, group))
+        return [int(min(n_heavy, max(2, round(q)))) for q in qs]
+    return [int(rng.choice(pool)) for _ in range(group)]
 
 
 def main():
@@ -113,9 +136,11 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--n-frag-oracle", choices=("on", "off"), default="off",
-                    help="feed the true fragment count instead of drawing it "
-                         "from p(n_frag | n_heavy); an oracle arm, not a method")
+    ap.add_argument("--n-frag", choices=("sample", "median", "spread", "oracle"),
+                    default="sample",
+                    help="how each group's fragment counts come from "
+                         "p(n_frag | n_heavy). oracle uses the true count and is "
+                         "a bound, not a method")
     ap.add_argument("--node-noise", type=float, default=None,
                     help="CTMC remasking noise on fragment identity; npgen.yaml "
                          "uses 2.0, tuned for unconditional diversity")
@@ -297,9 +322,8 @@ def main():
             nt = true_n_frag.get(Chem.MolToSmiles(mol))
             if nt is None:
                 nf_miss += 1
-            drawn = [draw_n_frag(prior, nh, rng) for _ in range(args.group)]
-            if args.n_frag_oracle == "on" and nt is not None:
-                drawn = [nt] * args.group
+            drawn = frag_counts_for_group(
+                prior, nh, rng, args.n_frag, args.group, nt)
             ns += drawn
             if nt is not None:
                 nf_drawn += drawn
@@ -405,7 +429,7 @@ def main():
     summary["valency_match_frac"] = float(np.mean([r["valency_ok"] for r in rows]))
     summary["valency_slots_short"] = float(np.mean([r["valency_short"] for r in rows]))
     summary["n_base_frag"] = sampler.fm_cfg.n_base_frag
-    summary["n_frag_oracle"] = args.n_frag_oracle
+    summary["n_frag_mode"] = args.n_frag
     if nf_true:
         d, t = np.array(nf_drawn), np.array(nf_true)
         summary["n_frag_signed_err"] = float((d - t).mean())

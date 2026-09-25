@@ -27,7 +27,7 @@ python scripts/eval_denovo.py \
   --rank "${RANK:-frequency}" \
   --cond-mode "${COND_MODE:-real}" \
   --frag-temp "${FRAG_TEMP:-1.0}" \
-  --n-frag-oracle "${N_FRAG_ORACLE:-off}" \
+  --n-frag "${N_FRAG:-sample}" \
   ${NODE_NOISE:+--node-noise "$NODE_NOISE"} \
   ${EDGE_NOISE:+--edge-noise "$EDGE_NOISE"} \
   --tag "${TAG:-${EXP_NAME}}"

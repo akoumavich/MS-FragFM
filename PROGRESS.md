@@ -4,6 +4,31 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-25 — n_frag is right 10% of the time; the oracle is worth 7 points
+
+Measured, 300 spectra: the fragment count handed to generation is exact 10% of the
+time and off by 4.2 on molecules with about 7 fragments. Feeding the true count
+takes fragment recall 0.2850 to 0.3566 and within-group Tanimoto 0.153 to 0.181,
+which confirms R27's mechanism. `n_frag_lookup_miss` 0 in both arms. RESULTS.md
+R28.
+
+Best-of-16 falls, 0.540 to 0.518: 16 different counts were buying lottery tickets
+on the count. Worth remembering when reading any best-of-k here.
+
+The prior is not the problem -- absolute error 4.23 against signed error -0.94
+means it is roughly centred and very wide, and sampling it 16 times inherits the
+whole width. So `--n-frag` now takes `sample` (all prior results), `median` (the
+conditional median, which minimises absolute error), `spread` (16 even quantiles,
+hedging the same range deterministically) and `oracle` (the bound). None touches
+the model. `draw_n_frag` is gone, replaced by `frag_counts_for_group`.
+
+Ceiling check: even with a perfect count, per-fragment accuracy is 35.7%, which
+compounds to 0.07% all-correct -- still under R23's 0.15% bound and far from the
+80% teacher-forced implies. The count is the largest single effect measured so far
+and closes about a sixth of the gap.
+
+---
+
 ## 2026-09-25 — Noise sweep null; the fragment count is drawn per candidate
 
 The eta/temperature sweep is a null: recall 0.285 to 0.292 across node/edge noise
