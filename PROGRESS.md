@@ -4,6 +4,38 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-25 — Predicted count recovers 69% of the oracle gap; count lever spent
+
+`--n-frag predict` gives fragment recall 0.3344 against 0.2850 for the old sampled
+count and 0.3566 for the oracle -- 69% of the gap, better than the 0.32 I predicted.
+RESULTS.md R31. `predict` is now the default, with no fallback.
+
+Two corrections that matter more than the number.
+
+The MAE-to-recall relationship is concave, not linear: 2.78 recall points per unit
+of absolute error from 4.225 to 2.450, then 0.91 from 2.450 to 0. So the remaining
+2.2 points are not worth chasing, and with R30's one-epoch saturation this lever is
+spent.
+
+`heavy_atom_exact` is not partial credit. The predictor beats the *oracle* on it,
+0.849 against 0.832, because the true count is not the count that best reproduces
+the formula when the fragments are wrong anyway -- a slightly-off count lets the
+composition projection hit the heavy-atom total more often. I read this metric as
+progress toward correctness in R22 and R23; it is not.
+
+Proposal updated surgically in "What the formula buys in graph space": the formula
+does not buy the fragment count, the count is predicted from the spectrum on
+mechanism (a fragment boundary is a cleavable bond and peaks come from cleaving
+those bonds), and both bounds are stated.
+
+Gap status: per-fragment 33.4% against 80% teacher-forced, top-1 still 0. Five
+explanations closed by measurement -- bag availability R25, architecture and
+objective R26, sampler noise R27, fragment count R28-R31. What survives is
+distribution shift between teacher-forced and generated states, which is what E8/E9
+was built for.
+
+---
+
 ## 2026-09-25 — n_frag predictor: absolute error 2.967 to 2.127, exact barely moves
 
 `train_nfrag.py` on the full test fold: absolute error 2.127 against the prior's

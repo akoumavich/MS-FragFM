@@ -1870,3 +1870,52 @@ with top-1 unchanged at 0.
 `--n-frag predict` wires the head into generation, committing the group to the
 predictive median rather than hedging, since R29 showed hedging cannot beat
 committing under a mean.
+
+---
+
+## R31 — The predicted count recovers 69% of the oracle gap, and the lever is spent
+
+300 test spectra, `e3b-xattn`, full constraint stack, count strategy varied.
+
+| strategy | n_frag MAE | recall mean | recall best | Tanimoto | heavy abs err | heavy exact |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `sample` | 4.225 | 0.2850 | 0.5400 | 0.1525 | 3.823 | 0.765 |
+| `spread` | 4.049 | 0.2887 | 0.5337 | 0.1545 | 3.736 | 0.769 |
+| `median` | 3.160 | 0.3024 | 0.4654 | 0.1760 | 2.792 | 0.822 |
+| **`predict`** | **2.450** | **0.3344** | 0.4870 | 0.1828 | **2.076** | **0.849** |
+| `oracle` | 0 | 0.3566 | 0.5177 | 0.1806 | 2.318 | 0.832 |
+
+Recall 0.3344 against the 0.32 predicted in R30, recovering **69%** of the oracle's
+7.2 points. Top-1 remains 0.
+
+**The relationship is concave, so this lever is now spent.** From absolute error
+4.225 to 2.450 buys 2.78 recall points per unit; from 2.450 to 0 buys 0.91. R30's
+linear extrapolation had the wrong shape -- it under-predicted, but the shape is
+what matters: driving the predictor toward zero error is worth at most 2.2 further
+points, and the last of them requires a count unavailable at test time. Combined
+with R30's saturation at one epoch, there is no remaining cheap gain here.
+
+**The predictor beats the oracle on heavy atoms**: absolute error 2.076 against
+2.318, exact 0.849 against 0.832. The true count is not the count that best
+reproduces the formula, because the fragments being assembled are wrong; given wrong
+fragments, a count slightly off truth lets the composition projection hit the
+heavy-atom total more often. So `heavy_atom_exact` is not partial credit toward
+correctness, and reading it that way in R22 and R23 overstated what the constraint
+stack had achieved.
+
+`predict` is now the default for `--n-frag`, with no fallback: a missing predictor
+crashes rather than silently reporting `sample` numbers.
+
+### Where the gap stands
+
+Per-fragment accuracy 33.4%, compounding to 0.05% for all seven correct, against a
+0.15% bound from R23 and a field at 18%. Five explanations are now closed by
+measurement: bag availability (R25), conditioning architecture and training
+objective (R26), sampler stochasticity (R27), and fragment count (R28-R31, bounded
+at 7.2 points with 69% taken).
+
+What survives is that the per-step distribution is accurate at the states teacher
+forcing visits and wrong at the states generation reaches. Teacher-forced fragment
+perplexity implies 80% per-fragment; generation delivers 33%. That is distribution
+shift, it is the one remaining hypothesis with enough headroom to close the gap,
+and the E8/E9 objectives are already built for it.

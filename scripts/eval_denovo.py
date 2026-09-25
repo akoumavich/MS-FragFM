@@ -87,7 +87,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n-frag",
                     choices=("sample", "median", "spread", "oracle", "predict"),
-                    default="sample",
+                    default="predict",
                     help="how each group's fragment counts come from "
                          "p(n_frag | n_heavy). predict uses the spectrum-conditioned "
                          "head from train_nfrag.py; oracle uses the true count and "
