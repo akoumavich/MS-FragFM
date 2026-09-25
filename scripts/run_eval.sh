@@ -14,6 +14,7 @@ export EXP_NAME="${EXP_NAME:-eval}"
 export WANDB_PROJECT="${WANDB_PROJECT:-MS-FragFM}"
 
 python scripts/eval_denovo.py \
+  --ckpt "${CKPT:-results/flow_spectrum.pt}" \
   --n-spectra "${N_SPECTRA:-2000}" \
   --group "${GROUP:-16}" \
   --steps "${STEPS:-100}" \
