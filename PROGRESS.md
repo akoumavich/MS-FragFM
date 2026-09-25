@@ -4,6 +4,31 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-25 — n_frag predictor: absolute error 2.967 to 2.127, exact barely moves
+
+`train_nfrag.py` on the full test fold: absolute error 2.127 against the prior's
+2.967, exact 0.157 against 0.139. RESULTS.md R30. The prior baseline is 2.967 on
+the full fold, not the 3.160 from R29's 300-spectrum subset; comparisons use 2.967.
+
+The spectrum makes the count closer without making it right. That is the useful
+direction for recall -- R29's gains tracked absolute error, not exactness -- but it
+means the peaks locate the count loosely rather than determining it.
+
+It saturates at epoch 1: val error 2.119 after one epoch, 2.156 after ten, while
+train CE falls 1.64 to 0.218. Past epoch 1 it is memorising structures (eight
+spectra per structure over ~25k train structures). So 0.85 fragments is what the
+peaks give up easily and more capacity will not extend it. Testing whether the rest
+exists would need a mechanism-explicit feature -- distinct cleavage series count
+from `peak_explain` -- rather than a bigger head.
+
+Prediction before measuring, from R29's two points (1.7 recall points per unit of
+absolute error): recall near 0.32, about half the oracle gap, top-1 unchanged.
+
+`--n-frag predict` now wires the head into generation, committing the group to the
+predictive median.
+
+---
+
 ## 2026-09-25 — median beats sampling; spread does not; building an n_frag predictor
 
 300 spectra, count strategy varied: `sample` 0.2850, `median` 0.3024, `spread`

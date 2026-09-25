@@ -85,11 +85,14 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--n-frag", choices=("sample", "median", "spread", "oracle"),
+    ap.add_argument("--n-frag",
+                    choices=("sample", "median", "spread", "oracle", "predict"),
                     default="sample",
                     help="how each group's fragment counts come from "
-                         "p(n_frag | n_heavy). oracle uses the true count and is "
-                         "a bound, not a method")
+                         "p(n_frag | n_heavy). predict uses the spectrum-conditioned "
+                         "head from train_nfrag.py; oracle uses the true count and "
+                         "is a bound, not a method")
+    ap.add_argument("--nfrag-ckpt", default=str(RESULTS / "nfrag.pt"))
     ap.add_argument("--node-noise", type=float, default=None,
                     help="CTMC remasking noise on fragment identity; npgen.yaml "
                          "uses 2.0, tuned for unconditional diversity")
@@ -207,6 +210,14 @@ def main():
     env = sampler.test_set.env
     prior, true_n_frag = frag_count_prior(env)
     nf_drawn, nf_true, nf_miss = [], [], 0
+
+    nfrag_model = None
+    if args.n_frag == "predict":
+        nck = torch.load(args.nfrag_ckpt, map_location="cpu", weights_only=False)
+        nfrag_model = SpectrumEncoder(out_dim=nck["max_n"]).cuda().eval()
+        nfrag_model.load_state_dict(nck["model"])
+        print(f"n_frag predictor: {Path(args.nfrag_ckpt).name}, "
+              f"max_n {nck['max_n']}")
     # True fragment ids per structure, for recall. frag_smi_to_idx maps the
     # fragment SMILES the decomposition produced onto pool indices.
     smi2idx = pickle.loads(Path(gcfg.frag_smi_to_idx_fn).read_bytes())
@@ -264,15 +275,26 @@ def main():
             sampler.composition_counts = fcounts
             sampler.composition_targets = np.repeat(tc, args.group, axis=0)
 
+        # The predictive median, not the argmax: absolute error is what R29 showed
+        # the recall gain tracks, and the median minimises it.
+        pred_nf = None
+        if nfrag_model is not None:
+            with torch.no_grad():
+                p = nfrag_model(dev).softmax(-1)
+            pred_nf = ((p.cumsum(-1) < 0.5).sum(-1) + 1).cpu().tolist()
+
         ns = []
-        for i in chunk:
+        for j, i in enumerate(chunk):
             mol = Chem.MolFromSmiles(spec_ds.df.iloc[i].smiles)
             nh = mol.GetNumHeavyAtoms()
             nt = true_n_frag.get(Chem.MolToSmiles(mol))
             if nt is None:
                 nf_miss += 1
-            drawn = frag_counts_for_group(
-                prior, nh, rng, args.n_frag, args.group, nt)
+            if pred_nf is not None:
+                drawn = [int(min(nh, max(2, pred_nf[j])))] * args.group
+            else:
+                drawn = frag_counts_for_group(
+                    prior, nh, rng, args.n_frag, args.group, nt)
             ns += drawn
             if nt is not None:
                 nf_drawn += drawn

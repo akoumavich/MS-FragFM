@@ -1828,3 +1828,45 @@ recomputed on the same spectra so the comparison is paired.
 Target: beat MAE 3.160. Reaching the oracle's 7.2 points needs MAE near zero,
 which will not happen; the question is how much of it a mechanism-grounded
 predictor recovers.
+
+---
+
+## R30 — The spectrum predicts the fragment count better, but only in absolute error
+
+`train_nfrag.py`, 10 epochs, 3.6M params. Full test fold, 17,505 spectra, paired
+against p(n_frag | n_heavy) on the same spectra.
+
+| | prior median | predictor |
+| --- | ---: | ---: |
+| absolute error | 2.967 | **2.127** |
+| exact | 0.139 | 0.157 |
+| signed error | -- | +0.023 |
+
+The prior baseline is 2.967 on the full fold against the 3.160 R29 measured on its
+300-spectrum subset, so comparisons from here use 2.967.
+
+**Absolute error falls 28%, exact match moves 1.8 points.** The spectrum makes the
+count *closer* without making it *right*. For fragment recall that is the useful
+direction -- R29's gains tracked absolute error, not exactness, because a count off
+by one still lets most fragments match -- but it says the peaks locate the count
+loosely rather than determining it.
+
+**It saturates at epoch 1.** Validation error is 2.119 after one epoch and 2.156
+after ten, while training cross-entropy falls 1.64 to 0.218. Everything after the
+first epoch is memorisation: 194k spectra over roughly 25k train structures is
+eight spectra per structure, and the model learns structures rather than the
+mechanism. So 0.85 fragments of absolute error is what the peaks give up easily,
+and more capacity or more epochs will not extend it. A mechanism-explicit feature
+-- the count of distinct cleavage series from `peak_explain` -- would be the way to
+test whether the rest is there at all.
+
+### Expected effect on recall, stated before measuring
+
+R29 gives two points: absolute error 4.225 to 0 spans 7.2 points of fragment
+recall, and 4.225 to 3.160 gave 1.7. Roughly 1.7 points per unit of absolute
+error. At 2.127 that predicts recall near **0.32**, about half the oracle gap,
+with top-1 unchanged at 0.
+
+`--n-frag predict` wires the head into generation, committing the group to the
+predictive median rather than hedging, since R29 showed hedging cannot beat
+committing under a mean.
