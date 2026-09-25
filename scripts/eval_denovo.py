@@ -106,6 +106,14 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--node-noise", type=float, default=None,
+                    help="CTMC remasking noise on fragment identity; npgen.yaml "
+                         "uses 2.0, tuned for unconditional diversity")
+    ap.add_argument("--edge-noise", type=float, default=None,
+                    help="CTMC remasking noise on coarse edges; npgen.yaml 20.0")
+    ap.add_argument("--frag-temp", type=float, default=1.0,
+                    help="temperature on the fragment logits; below 1 sharpens "
+                         "toward the argmax trajectory")
     ap.add_argument("--n-base-frag", type=int, default=0,
                     help="override the bag size drawn per Euler step (0 keeps "
                          "the trained value, 384). R16 measured per-fragment "
@@ -161,6 +169,15 @@ def main():
     gcfg.fragment_bag = "train"
     gcfg.force_save_dirn = gcfg.save_dirn = str(RESULTS / "_eval_scratch")
     os.makedirs(gcfg.save_dirn, exist_ok=True)
+    # npgen.yaml's remasking noise (2.0 / 20.0) and unit temperature were tuned
+    # for unconditional generation, where dispersion across samples is the
+    # product.  Here there is one right answer, so they are hyperparameters of
+    # the task, not constants.
+    if args.node_noise is not None:
+        gcfg.node_noise = args.node_noise
+    if args.edge_noise is not None:
+        gcfg.edge_noise = args.edge_noise
+    gcfg.frag_logit_temperature = args.frag_temp
 
     # Before the generator: it opens the fragment LMDB and py-lmdb refuses a
     # second open of one environment.  Cached, so later runs pay nothing.
@@ -368,6 +385,9 @@ def main():
     summary["valency_match_frac"] = float(np.mean([r["valency_ok"] for r in rows]))
     summary["valency_slots_short"] = float(np.mean([r["valency_short"] for r in rows]))
     summary["n_base_frag"] = sampler.fm_cfg.n_base_frag
+    summary["node_noise"] = gcfg.node_noise
+    summary["edge_noise"] = gcfg.edge_noise
+    summary["frag_temp"] = gcfg.frag_logit_temperature
     summary["valency_constraint"] = args.valency
     summary["tree_assembly"] = args.tree_assembly
     summary["ranking"] = args.rank

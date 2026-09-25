@@ -1575,3 +1575,82 @@ than the argument for it assumed. It is still worth testing — training on a
 systematically easier task than the real one is a defect regardless of whether
 availability is what surfaces it — but the pooled-vector conditioning is now the
 stronger of the two hypotheses.
+
+---
+
+## R26 — Cross-attention lowers training loss 5% and changes generation by nothing
+
+`e3b-xattn`: 60 epochs, per-token cross-attention, `frag_mask_dropout=0.25`.
+Evaluated at 2,000 test spectra against R23/R24's pooled-vector arm, full
+constraint stack both times.
+
+| | pooled, 50 ep | xattn, 60 ep |
+| --- | ---: | ---: |
+| teacher-forced frag loss @ ep50 | 0.4266 | **0.4049** |
+| teacher-forced frag loss, final | 0.4266 | **0.3923** |
+| fragment recall, mean | 0.2849 | **0.2853** |
+| fragment recall, best of 16 | 0.5347 | 0.5306 |
+| fragment recall, all | 0.0 | 0.0005 |
+| **top-1 / top-10** | **0 / 0** | **0 / 0** |
+| max Tanimoto to truth | 0.2410 | 0.2455 |
+| formula match | 0.1203 | 0.1151 |
+| heavy-atom exact | 0.7443 | 0.7631 |
+| assembly atom loss | 0.929 | 0.8751 |
+| assemblies connected | 0.9415 | 0.9430 |
+| validity | 0.99875 | 0.9991 |
+
+The baseline recall figures are at 300 spectra (R24, R25: 0.2839-0.2849 mean,
+0.5306-0.5347 best) against 2,000 here; recall is well resolved at 300, so the
+comparison holds, but it is not the same n.
+
+**A 5.1% improvement in teacher-forced fragment loss produced a 0.0004 change in
+generated fragment recall.** The two are decoupled. This is the strongest result
+of the session and it retires an entire family of explanations: the per-step
+conditional distribution was already good and is now better, and generation does
+not care.
+
+It also settles R24's framing against me. The pooled vector was never the
+bottleneck -- 0.4266 against the blind arm's 0.7310 says the spectrum was
+reaching the model perfectly well. Cross-attention was a fix for a problem that
+measurement did not support, and I built it on an argument from architecture
+rather than from evidence.
+
+### Where the loss goes instead: the samples scatter
+
+| | |
+| --- | ---: |
+| mean pairwise Tanimoto, 16 samples of the **same** spectrum | 0.1521 |
+| mean pairwise Tanimoto, samples of **different** spectra | 0.1003 |
+| across/within ratio | 0.660 |
+| unique molecules per group of 16 | 15.92 |
+| recall best / recall mean | 1.86 |
+
+Sixteen candidates for one spectrum share a Tanimoto of 0.15, which is close to
+unrelated for Morgan fingerprints. Conditioning is wired -- 0.152 within against
+0.103 across -- but the margin is thin, and every one of 16 samples is distinct.
+Best-of-16 recovers 1.86x what the mean does, which is the signature of
+independent noisy draws rather than a model committing to an answer.
+
+The task has exactly one right answer. The sampler is behaving as though its job
+were to cover chemical space.
+
+### The next experiment, and why it is decisive
+
+Generation runs on `cfgs/generate/npgen.yaml`: `node_noise 2.0`,
+`edge_noise 20.0`, unit temperature. Those were tuned for unconditional natural
+product generation, where dispersion across samples *is* the product. Nobody
+chose them for a conditional task, and they have been in every number this
+project has reported.
+
+Two outcomes, both informative:
+
+- **Recall climbs toward best-of-16 as noise falls.** Then the trajectories were
+  wandering, the per-step distribution was fine all along, and the fix costs one
+  config line rather than a retraining.
+- **Recall stays at 0.285.** Then the per-step distribution really is wrong at the
+  states generation actually visits, which is distribution shift and not
+  dispersion, and it needs self-conditioning or RL rather than a knob.
+
+`--node-noise`, `--edge-noise` and `--frag-temp` are now eval flags and are
+recorded in every summary, since every earlier result was implicitly run at
+2.0 / 20.0 / 1.0.

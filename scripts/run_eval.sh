@@ -26,4 +26,7 @@ python scripts/eval_denovo.py \
   --composition "${COMPOSITION:-on}" \
   --rank "${RANK:-frequency}" \
   --cond-mode "${COND_MODE:-real}" \
+  --frag-temp "${FRAG_TEMP:-1.0}" \
+  ${NODE_NOISE:+--node-noise "$NODE_NOISE"} \
+  ${EDGE_NOISE:+--edge-noise "$EDGE_NOISE"} \
   --tag "${TAG:-${EXP_NAME}}"

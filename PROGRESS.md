@@ -4,6 +4,38 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-25 — Cross-attention: 5% on training loss, nothing on generation
+
+`e3b-xattn` finished 60 epochs. Teacher-forced fragment loss 0.4049 at matched
+epoch 50 against the pooled vector's 0.4266, and 0.3923 at epoch 60. Generated
+fragment recall over 2,000 spectra: **0.2853 against 0.2849**. Top-1 still zero.
+RESULTS.md R26.
+
+Training loss and generation are decoupled in this model. That retires the
+training-side family of explanations, and it retires my R24 framing with it: the
+pooled vector was fine, as 0.4266 against the blind arm's 0.7310 already showed
+had I read it that way. I built cross-attention on an argument from architecture
+instead of from the measurement sitting in front of me.
+
+What the eval does show is that the samples scatter. Sixteen candidates for one
+spectrum share a Tanimoto of 0.152, against 0.103 for candidates of unrelated
+spectra -- conditioning is wired, but every one of 16 samples is distinct and
+best-of-16 recovers 1.86x the mean. That is independent noisy draws, not a model
+committing to an answer, on a task with exactly one right answer.
+
+Cause candidate, and it has been in every number this project has reported:
+generation inherits `cfgs/generate/npgen.yaml`, whose `node_noise 2.0` /
+`edge_noise 20.0` / unit temperature were tuned for unconditional generation,
+where dispersion is the product. `--node-noise`, `--edge-noise` and `--frag-temp`
+are now eval flags, recorded in every summary. This is the sweep parked at "leave
+it until E3 finishes"; E3 has finished, and it is now the top-priority experiment
+because it needs no retraining.
+
+Also fixed: `run_eval.sh` hardcoded `flow_spectrum.pt`, so no new checkpoint could
+be evaluated through the cluster path.
+
+---
+
 ## 2026-09-24 — Checkpoint tag now follows EXP_NAME, not --cond
 
 `e3b-xattn` crashed at startup: auto-resume found `results/flow_spectrum.pt` --
