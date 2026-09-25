@@ -74,17 +74,24 @@ def export_for_generator(ckpt, out_dir, ae_dir):
 
 
 def frag_count_prior(env):
-    """p(n_frag | n_heavy) from the train fold."""
+    """p(n_frag | n_heavy) from the train fold, and the true n_frag per molecule.
+
+    The second return value is the oracle arm: it separates "the model picks the
+    wrong fragments" from "the model was told to pick the wrong *number* of
+    fragments", which the marginal prior guarantees for most candidates.
+    """
     prior = defaultdict(list)
+    true_n = {}
     with env.begin() as txn:
         for key, val in txn.cursor():
-            if not key.decode().startswith("train"):
-                continue
             smp = pickle.loads(val)
             mol = Chem.MolFromSmiles(smp["smi"])
-            if mol is not None:
+            if mol is None:
+                continue
+            true_n[Chem.MolToSmiles(mol)] = int(smp["n_frag"])
+            if key.decode().startswith("train"):
                 prior[mol.GetNumHeavyAtoms()].append(int(smp["n_frag"]))
-    return prior
+    return prior, true_n
 
 
 def draw_n_frag(prior, n_heavy, rng):
@@ -106,6 +113,9 @@ def main():
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--spectra-per-batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--n-frag-oracle", choices=("on", "off"), default="off",
+                    help="feed the true fragment count instead of drawing it "
+                         "from p(n_frag | n_heavy); an oracle arm, not a method")
     ap.add_argument("--node-noise", type=float, default=None,
                     help="CTMC remasking noise on fragment identity; npgen.yaml "
                          "uses 2.0, tuned for unconditional diversity")
@@ -221,7 +231,8 @@ def main():
     # FragFMGenerator already opened the molecule LMDB, and py-lmdb refuses a
     # second open of one environment, so share its handle.
     env = sampler.test_set.env
-    prior = frag_count_prior(env)
+    prior, true_n_frag = frag_count_prior(env)
+    nf_drawn, nf_true, nf_miss = [], [], 0
     # True fragment ids per structure, for recall. frag_smi_to_idx maps the
     # fragment SMILES the decomposition produced onto pool indices.
     smi2idx = pickle.loads(Path(gcfg.frag_smi_to_idx_fn).read_bytes())
@@ -283,7 +294,16 @@ def main():
         for i in chunk:
             mol = Chem.MolFromSmiles(spec_ds.df.iloc[i].smiles)
             nh = mol.GetNumHeavyAtoms()
-            ns += [draw_n_frag(prior, nh, rng) for _ in range(args.group)]
+            nt = true_n_frag.get(Chem.MolToSmiles(mol))
+            if nt is None:
+                nf_miss += 1
+            drawn = [draw_n_frag(prior, nh, rng) for _ in range(args.group)]
+            if args.n_frag_oracle == "on" and nt is not None:
+                drawn = [nt] * args.group
+            ns += drawn
+            if nt is not None:
+                nf_drawn += drawn
+                nf_true += [nt] * args.group
 
         x = sampler.sample_molecule_graph_dynamic(n_frags=ns)
         # Heavy atoms the chosen fragments carry, before assembly. The projection
@@ -385,6 +405,13 @@ def main():
     summary["valency_match_frac"] = float(np.mean([r["valency_ok"] for r in rows]))
     summary["valency_slots_short"] = float(np.mean([r["valency_short"] for r in rows]))
     summary["n_base_frag"] = sampler.fm_cfg.n_base_frag
+    summary["n_frag_oracle"] = args.n_frag_oracle
+    if nf_true:
+        d, t = np.array(nf_drawn), np.array(nf_true)
+        summary["n_frag_signed_err"] = float((d - t).mean())
+        summary["n_frag_abs_err"] = float(np.abs(d - t).mean())
+        summary["n_frag_exact_frac"] = float((d == t).mean())
+        summary["n_frag_lookup_miss"] = nf_miss
     summary["node_noise"] = gcfg.node_noise
     summary["edge_noise"] = gcfg.edge_noise
     summary["frag_temp"] = gcfg.frag_logit_temperature

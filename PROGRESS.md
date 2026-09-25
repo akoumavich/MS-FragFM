@@ -4,6 +4,36 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-25 — Noise sweep null; the fragment count is drawn per candidate
+
+The eta/temperature sweep is a null: recall 0.285 to 0.292 across node/edge noise
+2.0/20.0 down to 0.0/0.0 and temperature 1.0 to 0.5. RESULTS.md R27.
+
+The informative number is the one that did not move. Within-group pairwise
+Tanimoto is 0.1525 at the defaults and 0.1566 with the sampler's stochasticity at
+exactly zero. Switching sampling noise off does not make the 16 candidates for one
+spectrum any more alike, so the dispersion R26 found does not come from the
+sampler, and my premise for this experiment was wrong, not merely my predicted
+effect size.
+
+Reading the code for where it does come from: the fragment bag is drawn once per
+batch per Euler step and shared across all 128 samples, so it cannot separate
+candidates in a group. But `eval_denovo.py` draws `n_frag` independently for each
+of the 16 candidates from p(n_frag | n_heavy). Two candidates given different
+fragment counts cannot be the same molecule, and one given the wrong count cannot
+match the true multiset at all -- recall is capped at min(drawn, true)/true before
+the model decides anything. That cap sits under every fragment-recall number in
+this project, R24's 28.5% included, and it fits molecules coming out 3.46 heavy
+atoms too small.
+
+Now instrumented: `n_frag_signed_err`, `n_frag_abs_err`, `n_frag_exact_frac` in
+every summary, plus `--n-frag-oracle on` to feed the true count. The oracle is a
+partition of the 28.5%, not a method -- the count is unknown at test time.
+`n_frag_lookup_miss` is recorded because a silent fallback to the prior would read
+as a refutation.
+
+---
+
 ## 2026-09-25 — Cross-attention: 5% on training loss, nothing on generation
 
 `e3b-xattn` finished 60 epochs. Teacher-forced fragment loss 0.4049 at matched

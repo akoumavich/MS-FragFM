@@ -1654,3 +1654,64 @@ Two outcomes, both informative:
 `--node-noise`, `--edge-noise` and `--frag-temp` are now eval flags and are
 recorded in every summary, since every earlier result was implicitly run at
 2.0 / 20.0 / 1.0.
+
+---
+
+## R27 — Sampling noise is not the dispersion, and the fragment count is drawn per candidate
+
+300 test spectra, `e3b-xattn`, full constraint stack, only the sampler varied.
+
+| node / edge noise | temp | recall mean | recall best | pairwise Tanimoto | across/within |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| 2.0 / 20.0 (npgen default) | 1.0 | 0.2850 | 0.5400 | 0.1525 | 0.695 |
+| 0.0 / 0.0 | 1.0 | 0.2891 | 0.5419 | 0.1497 | 0.676 |
+| 2.0 / 20.0 | 0.5 | 0.2916 | 0.5375 | 0.1574 | 0.643 |
+| 0.0 / 0.0 | 0.5 | 0.2920 | 0.5318 | 0.1566 | 0.634 |
+
+Recall moves 0.285 to 0.292 across the whole sweep. The npgen noise settings were
+not the problem, so that hypothesis is retired too.
+
+**The number that matters is the one that did not move.** Pairwise Tanimoto within
+a group is 0.1525 at the defaults and 0.1566 with remasking noise at exactly zero
+and temperature halved. Turning the sampler's stochasticity off does not make the
+16 candidates for one spectrum any more alike. So the dispersion R26 found is not
+coming from the sampler, and the prediction I attached to this experiment -- that
+falling noise would pull recall toward best-of-16 -- was wrong in its premise, not
+just its magnitude.
+
+### Where the dispersion comes from
+
+Two candidate sources, one ruled out by reading the code and one confirmed:
+
+*Not the fragment bag.* `mol_generator.py` draws `base_frag_idxs` once per batch
+per Euler step and shares the tensor across all 128 samples, so every candidate in
+a group sees the same bag at every step. Bag variation cannot separate them.
+
+*The fragment count.* `eval_denovo.py` draws `n_frag` **independently for each of
+the 16 candidates** from the empirical p(n_frag | n_heavy), because the count is
+genuinely unknown at test time and the formula only pins the heavy-atom total.
+Two candidates given different fragment counts cannot be the same molecule, and a
+candidate given the wrong count cannot match the true fragment multiset at all --
+recall is capped at min(drawn, true)/true before the model makes a single
+decision.
+
+That is a structural cap sitting underneath every fragment-recall number this
+project has reported, including the 28.5% of R24 and all four rows above. It also
+fits `heavy_atom_signed_err` of -3.46: molecules systematically too small.
+
+### What is now instrumented
+
+`n_frag_signed_err`, `n_frag_abs_err` and `n_frag_exact_frac` are recorded in
+every summary, so the size of the cap is measured rather than argued.
+`--n-frag-oracle on` feeds the true count instead of drawing it. That is an oracle,
+not a method -- the count is not available at test time -- but it partitions the
+28.5% into "wrong count" and "wrong fragments given the count", and those need
+different fixes. `n_frag_lookup_miss` counts structures the oracle could not
+resolve, because a silent fallback to the prior would make a null result look like
+a refutation.
+
+If the oracle moves recall substantially, the next real work is predicting n_frag
+from the spectrum and formula rather than sampling it from a marginal -- the
+spectrum constrains the fragment count directly through the number of distinct
+cleavage series, which is exactly the kind of thing the peaks are informative
+about.

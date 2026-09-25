@@ -31,7 +31,7 @@ MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' runai submit "$NAME" \
   -e COMPOSITION="${COMPOSITION:-}" -e RANK="${RANK:-}" \
   -e COND_MODE="${COND_MODE:-}" -e CKPT="${CKPT:-}" \
   -e NODE_NOISE="${NODE_NOISE:-}" -e EDGE_NOISE="${EDGE_NOISE:-}" \
-  -e FRAG_TEMP="${FRAG_TEMP:-}" \
+  -e FRAG_TEMP="${FRAG_TEMP:-}" -e N_FRAG_ORACLE="${N_FRAG_ORACLE:-}" \
   -e EXP_NAME="${EXP_NAME:-$NAME}" -e WANDB_PROJECT="${WANDB_PROJECT:-MS-FragFM}" \
   -e WANDB_DIR=/scratch/home/akoum/.cache/wandb \
   -e MSFRAGFM_DATA=/scratch/home/akoum/data/msfragfm \
