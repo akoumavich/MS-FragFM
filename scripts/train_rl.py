@@ -152,7 +152,7 @@ def main():
     coarse_gnn.train()
     cfg = sampler.fm_cfg
     cfg.latent_transform_param = sampler.cfg.latent_transform_param
-    cond_model = SpectrumEncoder(out_dim=cfg.cond_dim).cuda()
+    cond_model = SpectrumEncoder(out_dim=ck["cfg"]["embd_h_dim"]).cuda()
     cond_model.load_state_dict(ck["cond_model"], strict=False)
     use_xattn = bool(ck["cfg"].get("use_cross_attention"))
     print(f"{tag}: {len(ds):,} train spectra, arm {args.arm}, "
