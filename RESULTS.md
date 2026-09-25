@@ -1774,3 +1774,57 @@ is 0.07% for all-correct, still under R23's 0.15% bound, and still far from the 
 that teacher-forced loss implies. The count is the largest single effect measured
 so far and it closes about a sixth of the gap. The rest is fragment identity at
 generation-time states, which no sampler or count strategy will reach.
+
+---
+
+## R29 — Committing to the median beats sampling; hedging does not
+
+300 test spectra, `e3b-xattn`, full constraint stack, only the count strategy
+varied. `n_frag_lookup_miss` 0 throughout.
+
+| strategy | n_frag exact | n_frag MAE | recall mean | recall best | Tanimoto | heavy signed err |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `sample` | 0.0998 | 4.225 | 0.2850 | 0.5400 | 0.1525 | -3.412 |
+| `median` | 0.1600 | **3.160** | **0.3024** | 0.4654 | 0.1760 | -2.541 |
+| `spread` | 0.1037 | 4.049 | 0.2887 | 0.5337 | 0.1545 | -3.308 |
+| `oracle` | 1.0 | 0 | **0.3566** | 0.5177 | 0.1806 | -2.043 |
+
+**`median` recovers 1.7 of the oracle's 7.2 points**, and moves within-group
+Tanimoto 0.153 to 0.176 and heavy-atom error -3.41 to -2.54. Committing the group
+to one count is better than sampling one per candidate.
+
+**`spread` does not beat `sample`** -- 0.2887 against 0.2850, inside noise -- and I
+predicted it would "on principle alone". The principle was wrong on elementary
+grounds: even quantiles and iid draws share the same marginal over counts, so they
+have the same expected error *per candidate*. Stratifying removes variance in which
+counts the group contains, not error in any member, and recall averages over
+members. Hedging a distribution cannot beat sampling it under a mean.
+
+**The prior's own best point estimate is bad.** `median` is exact 16% of the time
+with an absolute error of 3.160 on molecules of about seven fragments. That is the
+floor for any strategy built on p(n_frag | n_heavy), so the remaining 5.4 points
+are not reachable by using this prior more cleverly. It needs a different
+predictor.
+
+Best-of-16 orders inversely to recall mean across the first three rows, which is
+the lottery-ticket effect of R28 again: a group spread over counts contains a
+luckier best member than a group that agrees.
+
+### Why the spectrum should be able to do better
+
+A BRICS fragment boundary is a cleavable bond, and MS/MS peaks arise from cleaving
+exactly those bonds, so the peak pattern is direct evidence about how many there
+are. The heavy-atom total carries none of that -- a twenty-atom molecule can be
+three large fragments or eight small ones, and p(n_frag | n_heavy) is wide for
+precisely that reason.
+
+`scripts/train_nfrag.py` trains the smallest thing that tests it: the existing
+spectrum encoder with a categorical head over the count. Categorical rather than
+regression because the predictive distribution is what a generation group needs --
+a mode to commit to, a spread if hedging ever pays -- and because absolute error is
+minimised by the predictive median rather than the mean. The prior baseline is
+recomputed on the same spectra so the comparison is paired.
+
+Target: beat MAE 3.160. Reaching the oracle's 7.2 points needs MAE near zero,
+which will not happen; the question is how much of it a mechanism-grounded
+predictor recovers.

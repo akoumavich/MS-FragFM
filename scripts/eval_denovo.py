@@ -17,10 +17,10 @@ between the two is also the most direct read on how much the formula is doing
 versus the spectrum.
 
 **Fragment count comes from the formula.** Generation needs n_frag per molecule,
-which is unknown at test time. The formula gives the heavy-atom count exactly,
-so n_frag is drawn from the empirical p(n_frag | n_heavy) measured on the train
-fold -- the concrete form of what Method A means by the formula constraining the
-fragment bag before generation begins.
+which is unknown at test time, and the formula gives only the heavy-atom count.
+`--n-frag` selects how the count is taken from p(n_frag | n_heavy); R28 measured
+the default draw as exact 10% of the time and the true count as worth 7.2 points
+of fragment recall, so this choice moves the result more than the model does.
 """
 
 import argparse
@@ -29,7 +29,7 @@ import os
 import pickle
 import random
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -43,6 +43,7 @@ from msfragfm.diversity import across_within_ratio, fragment_usage, group_metric
 from msfragfm.formula_mask import (admissible, fragment_counts, report,
                                    target_counts)
 from msfragfm.peak_explain import explained_from_coarse, pool_fragment_masses
+from msfragfm.nfrag import frag_count_prior, frag_counts_for_group
 from msfragfm.paths import RESULTS
 from msfragfm.spectrum import SpectrumEncoder
 
@@ -71,58 +72,6 @@ def export_for_generator(ckpt, out_dir, ae_dir):
     cfg["ae_model_dirn"] = str(ae_dir)
     (out_dir / "cfg.yaml").write_text(yaml.safe_dump(cfg))
     return ck
-
-
-def frag_count_prior(env):
-    """p(n_frag | n_heavy) from the train fold, and the true n_frag per molecule.
-
-    The second return value is the oracle arm: it separates "the model picks the
-    wrong fragments" from "the model was told to pick the wrong *number* of
-    fragments", which the marginal prior guarantees for most candidates.
-    """
-    prior = defaultdict(list)
-    true_n = {}
-    with env.begin() as txn:
-        for key, val in txn.cursor():
-            smp = pickle.loads(val)
-            mol = Chem.MolFromSmiles(smp["smi"])
-            if mol is None:
-                continue
-            true_n[Chem.MolToSmiles(mol)] = int(smp["n_frag"])
-            if key.decode().startswith("train"):
-                prior[mol.GetNumHeavyAtoms()].append(int(smp["n_frag"]))
-    return prior, true_n
-
-
-def frag_count_pool(prior, n_heavy):
-    for d in (0, 1, 2, 3, 5, 8):  # widen the window until the bucket is populated
-        pool = [v for k in range(n_heavy - d, n_heavy + d + 1) for v in prior.get(k, [])]
-        if len(pool) >= 20:
-            return pool
-    return []
-
-
-def frag_counts_for_group(prior, n_heavy, rng, mode, group, n_true):
-    """The n_frag handed to each candidate in one spectrum's group.
-
-    R28 measures `sample` -- 16 iid draws from p(n_frag | n_heavy) -- at 10%
-    exact and 4.2 fragments of absolute error, while the signed error is only
-    -0.94. So the prior is roughly centred and sampling it is what throws the
-    accuracy away. `median` minimises absolute error instead; `spread` covers the
-    same conditional distribution at even quantiles, hedging over the count
-    without paying the variance of drawing it 16 times. `oracle` is the bound.
-    """
-    if mode == "oracle" and n_true is not None:
-        return [n_true] * group
-    pool = frag_count_pool(prior, n_heavy)
-    if not pool:
-        return [max(2, round(n_heavy / 4))] * group
-    if mode == "median":
-        return [int(np.median(pool))] * group
-    if mode == "spread":
-        qs = np.quantile(pool, np.linspace(0.05, 0.95, group))
-        return [int(min(n_heavy, max(2, round(q)))) for q in qs]
-    return [int(rng.choice(pool)) for _ in range(group)]
 
 
 def main():

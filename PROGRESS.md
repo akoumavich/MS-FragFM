@@ -4,6 +4,38 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-25 — median beats sampling; spread does not; building an n_frag predictor
+
+300 spectra, count strategy varied: `sample` 0.2850, `median` 0.3024, `spread`
+0.2887, `oracle` 0.3566 fragment recall. RESULTS.md R29.
+
+`median` recovers 1.7 of the oracle's 7.2 points and is free -- it changes no
+model, only which count the group is given.
+
+`spread` does not beat `sample`, and I predicted it would "on principle alone".
+The principle was wrong on elementary grounds: even quantiles and iid draws share
+a marginal, so they have the same expected error per candidate. Stratifying
+removes variance in the group's composition, not error in any member, and recall
+averages over members.
+
+The load-bearing measurement is that the prior's own conditional median is exact
+only 16% with MAE 3.160. That is the floor for anything built on
+p(n_frag | n_heavy), so the remaining 5.4 points need a different predictor, not a
+cleverer use of this one.
+
+Built `scripts/train_nfrag.py`: the existing spectrum encoder with a categorical
+head over the count. The motivation is mechanical, not capacity -- a BRICS boundary
+is a cleavable bond and MS/MS peaks come from cleaving those bonds, while the
+heavy-atom total carries none of that. Categorical so the group gets a distribution
+rather than a point, and because absolute error is minimised by the predictive
+median. Baseline recomputed on the same spectra for a paired comparison. Target:
+beat MAE 3.160.
+
+`frag_count_prior` / `frag_count_pool` / `frag_counts_for_group` moved to
+`msfragfm/nfrag.py`, now that two scripts need them; `draw_n_frag` is gone.
+
+---
+
 ## 2026-09-25 — n_frag is right 10% of the time; the oracle is worth 7 points
 
 Measured, 300 spectra: the fragment count handed to generation is exact 10% of the
