@@ -20,4 +20,5 @@ python scripts/train_rl.py \
   --lr "${LR:-1e-5}" \
   --temperature "${TEMPERATURE:-1.0}" \
   --time-power "${TIME_POWER:-1.0}" \
+  --resume "${RESUME:-auto}" \
   --tag "${TAG:-${EXP_NAME}}"

@@ -120,6 +120,10 @@ def main():
     ap.add_argument("--sweep-t", action="store_true",
                     help="measure accuracy against mask fraction instead of "
                          "training: no optimizer, flow time held fixed")
+    ap.add_argument("--resume", default="auto",
+                    choices=("auto", "never"),
+                    help="auto picks up results/<tag>.pt, which a "
+                         "preempted job needs on restart")
     ap.add_argument("--tag", default=None)
     args = ap.parse_args()
     args.ckpt = repo_path(args.ckpt)
@@ -236,8 +240,60 @@ def main():
         print(f"wrote {RESULTS / ('sweep_t_' + tag + '.json')}")
         return
 
-    history, it = [], iter(loader)
-    for step in range(1, args.steps + 1):
+    # Resume. The cluster preempted tp-3 three times in twenty minutes and this
+    # script had no resume, so each restart began again at step 1 and nothing
+    # accumulated. train_flow_cond.py has had this since the E3 runs; train_rl did
+    # not, which is the whole reason that job could never finish.
+    ckpt_path = RESULTS / f"{tag}.pt"
+    history, start_step = [], 1
+    if args.resume == "auto" and ckpt_path.exists():
+        prev = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        if "step" not in prev:
+            print(f"{ckpt_path.name} has no step; starting over")
+        else:
+            frag_embedder.load_state_dict(prev["frag_embedder"])
+            coarse_gnn.load_state_dict(prev["coarse_gnn"])
+            cond_model.load_state_dict(prev["cond_model"])
+            opt.load_state_dict(prev["optimizer"])
+            torch.set_rng_state(prev["rng"].cpu())
+            if prev.get("cuda_rng") is not None:
+                torch.cuda.set_rng_state(prev["cuda_rng"].cpu())
+            history, start_step = prev.get("history", []), prev["step"] + 1
+            drift = {k: (v, vars(args)[k]) for k, v in prev["args"].items()
+                     if k in vars(args) and vars(args)[k] != v and k != "resume"}
+            if drift:
+                print(f"[warn] args changed since the checkpoint: {drift}")
+            print(f"resumed at step {start_step}")
+    if start_step > args.steps:
+        print("already complete")
+        tracking.finish(run)
+        return
+
+    def save(step):
+        """Write then rename: a kill during torch.save would leave a truncated
+        file and the next restart would have nothing."""
+        tmp = ckpt_path.with_suffix(".pt.tmp")
+        torch.save({"step": step,
+                    "frag_embedder": frag_embedder.state_dict(),
+                    "coarse_gnn": coarse_gnn.state_dict(),
+                    "cond_model": cond_model.state_dict(),
+                    "optimizer": opt.state_dict(),
+                    "rng": torch.get_rng_state(),
+                    "cuda_rng": torch.cuda.get_rng_state(),
+                    "history": history,
+                    "args": vars(args),
+                    # The live weights, written under "ema" because that is what
+                    # the generator loads (*_ema_best.pt) and eval_denovo reads.
+                    # No EMA is maintained: this is a short fine-tune from an
+                    # already-averaged checkpoint.
+                    "ema": {"frag_embedder": frag_embedder.state_dict(),
+                            "coarse_gnn": coarse_gnn.state_dict(),
+                            "cond_model": cond_model.state_dict()},
+                    "cfg": dict(cfg)}, tmp)
+        os.replace(tmp, ckpt_path)
+
+    it = iter(loader)
+    for step in range(start_step, args.steps + 1):
         try:
             batch = next(it)
         except StopIteration:
@@ -296,20 +352,11 @@ def main():
                   f"ent {row['policy_entropy']:.3f}  "
                   f"vocab {row['effective_vocab']:.1f}", flush=True)
         tracking.log(run, {f"sc/{k}": v for k, v in row.items()}, step=step)
+        if step % 250 == 0:
+            save(step)
 
+    save(args.steps)
     tracking.finish(run)
-    torch.save({"frag_embedder": frag_embedder.state_dict(),
-                "coarse_gnn": coarse_gnn.state_dict(),
-                "cond_model": cond_model.state_dict(),
-                # The live weights, written under "ema" because that is what
-                # the generator loads (*_ema_best.pt) and what eval_denovo reads.
-                # No EMA is maintained here: this is a short fine-tune from an
-                # already-averaged checkpoint, and a second average over 5000
-                # steps would mostly reproduce the starting point.
-                "ema": {"frag_embedder": frag_embedder.state_dict(),
-                        "coarse_gnn": coarse_gnn.state_dict(),
-                        "cond_model": cond_model.state_dict()},
-                "cfg": dict(cfg), "args": vars(args)}, RESULTS / f"{tag}.pt")
     (RESULTS / f"train_{tag}.json").write_text(json.dumps(
         {"args": vars(args), "history": history}, indent=2))
     print(f"\nwrote {RESULTS / (tag + '.pt')}")
