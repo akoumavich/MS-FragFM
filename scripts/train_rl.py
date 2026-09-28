@@ -112,6 +112,11 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--time-power", type=float, default=1.0,
+                    help="bias the flow-time draw toward the fully "
+                         "masked end; 1.0 is uniform, 3.0 puts 53%% of "
+                         "steps below t=0.15 where R34 measured "
+                         "accuracy at 0.37")
     ap.add_argument("--sweep-t", action="store_true",
                     help="measure accuracy against mask fraction instead of "
                          "training: no optimizer, flow time held fixed")
@@ -177,6 +182,7 @@ def main():
               + list(cond_model.parameters()))
     opt = torch.optim.AdamW(params, lr=args.lr)
     cfg.lr, cfg.lr_warmup, cfg.n_iter_done = args.lr, False, 0
+    cfg.time_power = args.time_power
     scheds = (DistortScheduler(cfg.node_distort_schedule),
               DistortScheduler(cfg.edge_distort_schedule),
               DistortScheduler(cfg.latent_z_distort_schedule))

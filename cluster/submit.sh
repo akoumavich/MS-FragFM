@@ -33,6 +33,7 @@ MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' runai submit "$NAME" \
   -e NODE_NOISE="${NODE_NOISE:-}" -e EDGE_NOISE="${EDGE_NOISE:-}" \
   -e FRAG_TEMP="${FRAG_TEMP:-}" -e N_FRAG="${N_FRAG:-}" \
   -e ARM="${ARM:-}" -e TEMPERATURE="${TEMPERATURE:-}" \
+  -e TIME_POWER="${TIME_POWER:-}" \
   -e EXP_NAME="${EXP_NAME:-$NAME}" -e WANDB_PROJECT="${WANDB_PROJECT:-MS-FragFM}" \
   -e WANDB_DIR=/scratch/home/akoum/.cache/wandb \
   -e MSFRAGFM_DATA=/scratch/home/akoum/data/msfragfm \

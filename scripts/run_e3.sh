@@ -22,4 +22,5 @@ python scripts/train_flow_cond.py \
   --bs "${BS:-256}" \
   --lr "${LR:-2e-4}" \
   --tag "$EXP_NAME" \
+  --time-power "${TIME_POWER:-1.0}" \
   --resume "${RESUME:-auto}"

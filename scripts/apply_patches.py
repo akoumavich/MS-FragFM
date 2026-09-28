@@ -639,8 +639,19 @@ PATCHES = [
         model_t[bs // 2 :] = 1.0 - model_t[: bs // 2]""",
         new="""        model_t = torch.rand(bs).to(device)
         model_t[bs // 2 :] = 1.0 - model_t[: bs // 2]
+        # R34: accuracy runs from 0.37 at t=0.05 to 1.00 at t=0.95, and a uniform
+        # draw spends most of its gradient above t=0.5 where there is nothing left
+        # to win.  A power above 1 pushes the draw toward the fully masked end,
+        # which is where the trajectory's first and never-revised commitments are
+        # made.  Applied after the antithetic pairing, deliberately: pairing exists
+        # to balance coverage, and the point here is to unbalance it.
+        _tp = getattr(cfg, "time_power", 1.0)
+        if _tp != 1.0:
+            model_t = model_t.clamp_min(1e-6) ** _tp
         if rl is not None and rl.get("model_t") is not None:
-            model_t = torch.full_like(model_t, float(rl["model_t"]))""",
+            _mt = rl["model_t"]
+            model_t = (_mt.to(device).float() if torch.is_tensor(_mt)
+                       else torch.full_like(model_t, float(_mt)))""",
     ),
     dict(
         name="trainflow-rl-loss",

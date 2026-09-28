@@ -90,6 +90,9 @@ def main():
                          "here an epoch is 757 iters, so it would not finish "
                          "warming up until epoch 13")
     ap.add_argument("--tag", default=None)
+    ap.add_argument("--time-power", type=float, default=1.0,
+                    help="bias the flow-time draw toward the fully "
+                         "masked end (R34); 1.0 reproduces uniform")
     ap.add_argument("--resume", default="auto", choices=["auto", "never"],
                     help="auto picks up the checkpoint if one is there, which is "
                          "what a preempted job needs on restart")
@@ -116,6 +119,7 @@ def main():
     cfg.lr = args.lr
     cfg.lr_warmup_iter = args.warmup
     cfg.frag_mask_dropout = args.frag_mask_dropout
+    cfg.time_power = args.time_power
     cfg.use_cross_attention = (args.cond == "spectrum"
                                and args.cross_attention == "on")
 
