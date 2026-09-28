@@ -330,7 +330,7 @@ PATCHES = [
             "assignment falls back to the released behaviour instead of "
             "producing something worse."
         ),
-        marker="msfragfm.assemble",
+        marker="_asm.ENABLED",
         old="""        sel_recon_ae_to_pred_e_type = pred_ae_adj[
             d.ae_to_pred_index[0], d.ae_to_pred_index[1]
         ]""",
@@ -633,7 +633,11 @@ PATCHES = [
             "latent losses by it would claim a credit assignment the reward does "
             "not support."
         ),
-        marker='rl["out"] =',
+        # The marker names the part most likely to be revised, not just the part
+        # that proves the patch ran: a marker on `rl["out"] =` reported "already"
+        # after the denominator below was changed to abs(), so the fix silently
+        # never reached an existing checkout.
+        marker="w.abs().sum()",
         old="""        reachable = torch.isfinite(
             pred_h_logit.gather(1, h_type.unsqueeze(1)).squeeze(1)
         )
@@ -772,6 +776,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="report only, do not write")
     args = ap.parse_args()
+
+    # A marker that does not appear in its own replacement can never match, so the
+    # patch reports "not applied" on every run -- and when its anchor survives
+    # inside the replacement, it re-inserts the block every time.  That happened
+    # to fragfm-tree-assembly, whose marker read "msfragfm.assemble" against a
+    # replacement saying "from msfragfm import assemble as _asm".
+    for p in PATCHES:
+        mk = p.get("marker")
+        if mk and mk not in p["new"]:
+            raise SystemExit(
+                f"patch {p['name']}: marker {mk!r} is absent from its own "
+                f"replacement, so it would re-apply on every run")
 
     n_applied = n_already = 0
     for p in PATCHES:
