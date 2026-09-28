@@ -637,7 +637,7 @@ PATCHES = [
         # that proves the patch ran: a marker on `rl["out"] =` reported "already"
         # after the denominator below was changed to abs(), so the fix silently
         # never reached an existing checkout.
-        marker="w.abs().sum()",
+        marker='"cur_frag_idxs": cur_frag_idxs',
         old="""        reachable = torch.isfinite(
             pred_h_logit.gather(1, h_type.unsqueeze(1)).squeeze(1)
         )
@@ -657,6 +657,9 @@ PATCHES = [
                 "reachable": reachable,
                 "batch": coarse_graph.batch,
                 "crpt_h_mask": crpt_h_mask,
+                # Logit columns are positions in the bag, so mapping a prediction
+                # back to a global fragment id needs this.
+                "cur_frag_idxs": cur_frag_idxs,
             }
         if rl is not None and rl.get("weight") is not None:
             w = rl["weight"].to(device)[coarse_graph.batch][reachable]
@@ -775,7 +778,31 @@ def __getattr__(name):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="report only, do not write")
+    ap.add_argument("--force", action="store_true",
+                    help="git-restore every patched file first, then apply all "
+                         "patches. This is the correct procedure after editing "
+                         "any patch body: a marker records that a patch ran, not "
+                         "which version of it ran, so an edited patch otherwise "
+                         "reports 'already' and never reaches the checkout.")
     args = ap.parse_args()
+
+    if args.force:
+        import subprocess
+        from collections import defaultdict
+
+        by_repo = defaultdict(set)
+        for p in PATCHES:
+            for path in p.get("paths", [p.get("path")]):
+                # The nearest ancestor holding a .git is the repo to restore from.
+                for parent in path.parents:
+                    if (parent / ".git").exists():
+                        by_repo[parent].add(
+                            str(path.relative_to(parent)).replace("\\", "/"))
+                        break
+        for repo, files in sorted(by_repo.items()):
+            subprocess.run(["git", "-C", str(repo), "checkout", "--", *sorted(files)],
+                           check=True)
+            print(f"  restored {len(files)} file(s) in {repo.name}")
 
     # A marker that does not appear in its own replacement can never match, so the
     # patch reports "not applied" on every run -- and when its anchor survives
