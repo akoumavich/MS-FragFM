@@ -248,8 +248,14 @@ def main():
     torch.save({"frag_embedder": frag_embedder.state_dict(),
                 "coarse_gnn": coarse_gnn.state_dict(),
                 "cond_model": cond_model.state_dict(),
+                # The live weights, written under "ema" because that is what
+                # the generator loads (*_ema_best.pt) and what eval_denovo reads.
+                # No EMA is maintained here: this is a short fine-tune from an
+                # already-averaged checkpoint, and a second average over 5000
+                # steps would mostly reproduce the starting point.
                 "ema": {"frag_embedder": frag_embedder.state_dict(),
-                        "coarse_gnn": coarse_gnn.state_dict()},
+                        "coarse_gnn": coarse_gnn.state_dict(),
+                        "cond_model": cond_model.state_dict()},
                 "cfg": dict(cfg), "args": vars(args)}, RESULTS / f"{tag}.pt")
     (RESULTS / f"train_{tag}.json").write_text(json.dumps(
         {"args": vars(args), "history": history}, indent=2))
