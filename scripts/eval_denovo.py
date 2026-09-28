@@ -48,8 +48,19 @@ from msfragfm.paths import RESULTS
 from msfragfm.spectrum import SpectrumEncoder
 
 FRAGFM = Path(__file__).resolve().parents[2] / "FragFM"
+REPO = Path(__file__).resolve().parents[1]
 RDLogger.DisableLog("rdApp.*")
 
+
+def repo_path(p):
+    """Resolve against the MS-FragFM root.
+
+    Both scripts chdir into FragFM so its own relative paths work, which means a
+    relative --ckpt from the caller would otherwise resolve inside FragFM. `--data`
+    is deliberately left alone: it *is* FragFM-relative.
+    """
+    q = Path(p)
+    return str(q if q.is_absolute() else (REPO / q).resolve())
 
 def export_for_generator(ckpt, out_dir, ae_dir):
     """Write our checkpoint in the layout FragFMGenerator expects.
@@ -128,6 +139,9 @@ def main():
                          "not move, conditioning is inert at generation time")
     ap.add_argument("--tag", default="eval_spectrum")
     args = ap.parse_args()
+    args.ckpt = repo_path(args.ckpt)
+    args.ae = repo_path(args.ae)
+    args.nfrag_ckpt = repo_path(args.nfrag_ckpt)
 
     sys.path.insert(0, str(FRAGFM))
     os.chdir(FRAGFM)

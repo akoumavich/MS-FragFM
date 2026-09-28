@@ -48,6 +48,7 @@ from msfragfm.spectra_data import cond_inputs, make_spectrum_dataset
 from msfragfm.spectrum import SpectrumEncoder
 
 FRAGFM = Path(__file__).resolve().parents[2] / "FragFM"
+REPO = Path(__file__).resolve().parents[1]
 RDLogger.DisableLog("rdApp.*")
 
 
@@ -68,6 +69,16 @@ class OneBatch:
     def __len__(self):
         return 1
 
+
+def repo_path(p):
+    """Resolve against the MS-FragFM root.
+
+    Both scripts chdir into FragFM so its own relative paths work, which means a
+    relative --ckpt from the caller would otherwise resolve inside FragFM. `--data`
+    is deliberately left alone: it *is* FragFM-relative.
+    """
+    q = Path(p)
+    return str(q if q.is_absolute() else (REPO / q).resolve())
 
 def predicted_ids(out, temperature):
     """The model's own choice per slot, as global fragment ids.
@@ -103,6 +114,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--tag", default=None)
     args = ap.parse_args()
+    args.ckpt = repo_path(args.ckpt)
+    args.ae = repo_path(args.ae)
     tag = args.tag or f"rl_{args.arm}"
 
     sys.path.insert(0, str(FRAGFM))
