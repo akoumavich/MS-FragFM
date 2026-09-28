@@ -38,7 +38,7 @@ from pathlib import Path
 
 import torch
 from rdkit import RDLogger
-from torch_geometric.loader import DataLoader
+from torch.utils.data import DataLoader
 
 from msfragfm import tracking
 from msfragfm.diversity import fragment_usage, policy_entropy
@@ -107,10 +107,12 @@ def main():
     sys.path.insert(0, str(FRAGFM))
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     os.chdir(FRAGFM)
+    import exe.train_flow as tf
     from exe.train_flow import process_single_epoch
+    from fragfm.dataset import collate_frag_fm_dataset
     from fragfm.distort_scheduler import DistortScheduler
-    from fragfm.model.coarse_graph_propagate import CoarseGraphPropagate
-    from fragfm.model.frag_to_vect import FragToVect
+    from fragfm.model.ae import FragJunctionAE
+    from fragfm.model.flow import CoarseGraphPropagate, FragToVect
     from fragfm.utils.file import read_yaml_as_easydict
 
     stem = Path(args.data).stem
@@ -124,13 +126,13 @@ def main():
                                "train")
     print(f"{tag}: {len(ds):,} train spectra, arm {args.arm}")
 
-    from fragfm.model.frag_junction_ae import FragJunctionAE
-
     ae_cfg = read_yaml_as_easydict("save/ae_model/npgen/cfg.yaml")
     ae = FragJunctionAE(ae_cfg).cuda().eval()
     ae.load_state_dict(torch.load(args.ae, map_location="cpu"))
-    for p in ae.parameters():
+    for p in ae.parameters():  # the latent target must not move
         p.requires_grad_(False)
+    # Set in train_flow.py's main block, which we do not run.
+    cfg.latent_z_dim = ae_cfg.latent_z_dim
 
     frag_embedder = FragToVect(cfg).cuda()
     coarse_gnn = CoarseGraphPropagate(cfg).cuda()
@@ -138,6 +140,17 @@ def main():
     coarse_gnn.load_state_dict(ck["ema"]["coarse_gnn"])
     cond_model = SpectrumEncoder(out_dim=cfg.embd_h_dim).cuda()
     cond_model.load_state_dict(ck["cond_model"], strict=False)
+
+    # process_single_epoch writes module-level EMA globals; supply them rather
+    # than let it fail on them.
+    import copy
+
+    tf.ema_frag_embedder = copy.deepcopy(frag_embedder).eval()
+    tf.ema_coarse_gnn = copy.deepcopy(coarse_gnn).eval()
+    tf.ema_cond_model = copy.deepcopy(cond_model).eval()
+    for m in (tf.ema_frag_embedder, tf.ema_coarse_gnn, tf.ema_cond_model):
+        for p in m.parameters():
+            p.requires_grad_(False)
 
     params = (list(frag_embedder.parameters()) + list(coarse_gnn.parameters())
               + list(cond_model.parameters()))
@@ -149,7 +162,7 @@ def main():
 
     torch.manual_seed(args.seed)
     loader = DataLoader(ds, batch_size=args.bs, shuffle=True, drop_last=True,
-                        num_workers=4)
+                        num_workers=4, collate_fn=collate_frag_fm_dataset)
     run = tracking.init(tag, {**vars(args), "n_train": len(ds)})
 
     history, it = [], iter(loader)
