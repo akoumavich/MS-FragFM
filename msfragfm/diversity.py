@@ -138,5 +138,8 @@ def policy_entropy(logits, mask=None):
     import torch
 
     logp = torch.log_softmax(logits, dim=-1)
-    ent = -(logp.exp() * logp).sum(-1)
+    # Fragment logits carry -inf at every candidate outside the bag, and those
+    # terms are 0 * -inf = nan rather than the zero they should contribute, which
+    # made the whole instrument read nan.
+    ent = -(logp.exp() * logp.nan_to_num(neginf=0.0)).sum(-1)
     return float(ent[mask].mean() if mask is not None else ent.mean())

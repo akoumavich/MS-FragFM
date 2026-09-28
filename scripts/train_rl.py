@@ -37,6 +37,7 @@ import sys
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from rdkit import RDLogger
 from torch.utils.data import DataLoader
 
@@ -199,20 +200,34 @@ def main():
             frag_occurance_source="train", optimizer=opt, cond_model=cond_model,
             rl=rl)
 
+        # The comparison that isolates the hypothesis. `fragment_type_loss` runs
+        # over every slot, and a revealed slot has its answer sitting in the input
+        # -- trivial for `teacher`, actively misleading for `selfcond` -- so most
+        # of the gap between the arms would be the revealed slots rather than the
+        # model's ability to predict a masked one. Restricted to masked slots,
+        # both arms are scored on the same question.
+        o = rl["out"]
+        m = o["crpt_h_mask"] & o["reachable"]
+        frag_masked = (F.cross_entropy(o["h_logit"][m], o["h_type"][m]).item()
+                       if bool(m.any()) else float("nan"))
+
         row = {"loss": res["loss"], "frag_loss": res["fragment_type_loss"],
+               "frag_loss_masked": frag_masked,
+               "masked_frac": float(m.float().mean()),
                "edge_loss": res["fragment_edge_loss"],
                "latent_loss": res["latent_loss"],
                # How often the model's own pick matches the truth at full
                # corruption: the per-slot accuracy that compounds into top-1.
                "state_agreement": agree,
-               "policy_entropy": policy_entropy(rl["out"]["h_logit"].detach()),
+               "policy_entropy": policy_entropy(o["h_logit"].detach(), m),
                "effective_vocab": fragment_usage(
                    state_h.tolist(), int(out1["cur_frag_idxs"].max()) + 1
                )["effective_vocab"]}
         history.append({"step": step, **row})
         if step == 1 or step % 25 == 0:
             print(f"  step {step:>5}  frag {row['frag_loss']:.4f}  "
-                  f"agree {agree:.4f}  ent {row['policy_entropy']:.3f}  "
+                  f"masked {frag_masked:.4f}  agree {agree:.4f}  "
+                  f"ent {row['policy_entropy']:.3f}  "
                   f"vocab {row['effective_vocab']:.1f}", flush=True)
         tracking.log(run, {f"sc/{k}": v for k, v in row.items()}, step=step)
 
