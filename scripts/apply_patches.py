@@ -623,6 +623,26 @@ PATCHES = [
                 ht_type = h_type.clone()""",
     ),
     dict(
+        name="trainflow-rl-fixed-time",
+        path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
+        why=(
+            "Hold the flow time fixed, to measure accuracy as a function of how "
+            "much of the graph is still masked.  Training draws t uniformly, so "
+            "the average state is half revealed, while the Euler trajectory starts "
+            "fully masked and commits its first fragments there with no context.  "
+            "R33 found self-conditioning did not move generation, which leaves "
+            "mask fraction as the remaining structural difference between training "
+            "states and generated ones."
+        ),
+        marker='rl.get("model_t")',
+        old="""        model_t = torch.rand(bs).to(device)
+        model_t[bs // 2 :] = 1.0 - model_t[: bs // 2]""",
+        new="""        model_t = torch.rand(bs).to(device)
+        model_t[bs // 2 :] = 1.0 - model_t[: bs // 2]
+        if rl is not None and rl.get("model_t") is not None:
+            model_t = torch.full_like(model_t, float(rl["model_t"]))""",
+    ),
+    dict(
         name="trainflow-rl-loss",
         path=THIRD_PARTY / "FragFM" / "exe" / "train_flow.py",
         why=(

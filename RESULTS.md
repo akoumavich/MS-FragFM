@@ -1976,3 +1976,57 @@ Thirty steps is a smoke test. The claim that error correction closes the generat
 gap needs a real run and an eval, with `teacher` trained identically as the control --
 both arms take gradient steps, so any improvement in `selfcond` has to be measured
 against `teacher` rather than against `e3b-xattn`.
+
+---
+
+## R33 — Self-conditioning is a null: error correction does not move generation
+
+Both arms fine-tuned 5000 steps from `e3b-xattn`, batch 64, lr 1e-5, identical code
+paths differing only in what sits in the revealed slots. 300 test spectra.
+
+| | recall mean | recall best | Tanimoto | heavy exact | top-1 |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| `e3b-xattn` (no fine-tune) | 0.3344 | 0.4870 | 0.1828 | 0.849 | 0 |
+| `sc-selfcond` | 0.3358 | 0.4671 | 0.2031 | 0.840 | 0 |
+| `sc-teacher` | **0.3414** | 0.4913 | 0.1843 | 0.860 | 0 |
+
+`selfcond` is 0.0056 *below* `teacher`, and both sit within noise of the untuned
+baseline. Training the model to correct its own committed errors changed generated
+recall by nothing. Five thousand steps of ordinary fine-tuning changed it by nothing
+either, which is the control working.
+
+Training did what it was asked: all-slot loss fell 2.402 to 0.385 while masked-slot
+loss returned to its starting 1.156 and `agree` recovered to 0.706. The model learned
+to revise. Generation did not care.
+
+So R32 diagnosed the behaviour correctly -- the model copies a wrong revealed value --
+and prescribed the wrong cure. Being unable to revise is real and is not what costs
+the 47 points.
+
+### The contradiction this leaves, stated precisely
+
+Per-slot accuracy is **0.77** at random corruption with the model's own errors in
+context, and **0.33** at the states the Euler loop reaches, which is what recall
+measures. Self-conditioning closed the gap between "context is true" and "context is
+wrong" and generation was unmoved. Therefore what makes Euler states hard is not that
+the context is wrong.
+
+The remaining structural difference is *how much* is masked. Training draws t
+uniformly, so the average state is half revealed. The Euler trajectory necessarily
+begins fully masked, and its first fragments are committed there with no context at
+all -- the least informed decisions in the whole trajectory, made in the region
+training visits least, and then, per R32, never revised.
+
+`--sweep-t` measures accuracy against mask fraction directly, with the flow time held
+fixed by `trainflow-rl-fixed-time`. If argmax accuracy on masked slots collapses as t
+falls, the account is complete and the fix is a training-time distribution over t
+rather than another architecture or sampler change. If accuracy is flat in t, then
+none of the state-distribution explanations survive and the gap is somewhere I have
+not looked.
+
+### Cost of this line so far
+
+R26 (cross-attention, two 12-hour runs), R27 (sampler noise), R32/R33
+(self-conditioning, two 90-minute runs) are all nulls. The count work R28-R31 is the
+only intervention since R21 that moved the number, and it is bounded at 7.2 points
+with 69% taken. Nothing has moved top-1 off zero.

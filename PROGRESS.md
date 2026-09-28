@@ -4,6 +4,35 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-28 — Self-conditioning is a null; measuring accuracy against mask fraction
+
+Both arms fine-tuned 5000 steps from e3b-xattn. Fragment recall: selfcond 0.3358,
+teacher 0.3414, untuned baseline 0.3344. All within noise. RESULTS.md R33.
+
+Training worked -- all-slot loss 2.402 to 0.385, masked loss back to its starting
+1.156, agree recovered to 0.706 -- so the model did learn to revise its own
+committed errors. Generation did not care. R32 described the behaviour correctly and
+prescribed the wrong cure.
+
+What that leaves: per-slot accuracy is 0.77 at random corruption with the model's own
+errors in context and 0.33 at the states the Euler loop reaches. Self-conditioning
+closed the "context is wrong" gap and nothing moved, so that is not the cause. The
+remaining structural difference is mask fraction: training draws t uniformly so the
+average state is half revealed, while the trajectory starts fully masked and commits
+its first fragments with no context, in the region training visits least, and then
+never revises them.
+
+Added --sweep-t and the trainflow-rl-fixed-time patch to measure argmax accuracy on
+masked slots as a function of t. Collapse as t falls completes the account and points
+at the training distribution over t; flat in t kills the whole state-distribution
+family and the gap is somewhere I have not looked.
+
+Tally on this line: R26, R27, R32/R33 are nulls, costing two 12-hour and two 90-minute
+runs. R28-R31 (the fragment count) is the only thing since R21 that moved the number,
+bounded at 7.2 points with 69% taken. Top-1 has never left zero.
+
+---
+
 ## 2026-09-28 — The model copies its own errors; it was never trained to revise
 
 Self-conditioning instrumented and smoke-tested. Two arms, identical code, differing

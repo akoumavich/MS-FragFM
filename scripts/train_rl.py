@@ -112,6 +112,9 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--sweep-t", action="store_true",
+                    help="measure accuracy against mask fraction instead of "
+                         "training: no optimizer, flow time held fixed")
     ap.add_argument("--tag", default=None)
     args = ap.parse_args()
     args.ckpt = repo_path(args.ckpt)
@@ -182,6 +185,50 @@ def main():
     loader = DataLoader(ds, batch_size=args.bs, shuffle=True, drop_last=True,
                         num_workers=4, collate_fn=collate_frag_fm_dataset)
     run = tracking.init(tag, {**vars(args), "n_train": len(ds)})
+
+    if args.sweep_t:
+        # The Euler trajectory starts at t=0 with everything masked and ends at
+        # t=1.  Training samples t uniformly, so if accuracy collapses as t falls,
+        # the trajectory's earliest and most consequential commitments are made in
+        # exactly the region training visits least -- and R33 ruled out the other
+        # structural difference, wrong values in the revealed slots.
+        print("     t  masked_frac  argmax_acc  frag_masked  entropy")
+        rows = []
+        for t in (0.05, 0.15, 0.25, 0.35, 0.5, 0.65, 0.8, 0.95):
+            ag = fm = en = mf = 0.0
+            n = 0
+            it2 = iter(loader)
+            for _ in range(args.steps):
+                try:
+                    b = next(it2)
+                except StopIteration:
+                    break
+                probe = {"model_t": t}
+                with torch.no_grad():
+                    process_single_epoch(
+                        cfg, ae, frag_embedder, coarse_gnn, OneBatch(ds, b),
+                        scheds, frag_occurance_source="train", optimizer=None,
+                        cond_model=cond_model, rl=probe)
+                o = probe["out"]
+                m = o["crpt_h_mask"] & o["reachable"]
+                if not bool(m.any()):
+                    continue
+                # Accuracy on slots that are still masked: what the model gets
+                # right where it has to choose rather than copy.
+                ag += float((o["h_logit"][m].argmax(-1)
+                             == o["h_type"][m]).float().mean())
+                fm += float(F.cross_entropy(o["h_logit"][m], o["h_type"][m]))
+                en += policy_entropy(o["h_logit"].detach(), m)
+                mf += float(o["crpt_h_mask"].float().mean())
+                n += 1
+            if n:
+                rows.append({"t": t, "masked_frac": mf / n, "argmax_acc": ag / n,
+                             "frag_masked": fm / n, "entropy": en / n})
+                print(f"  {t:.2f}  {mf / n:11.3f}  {ag / n:10.4f}"
+                      f"  {fm / n:11.4f}  {en / n:7.3f}", flush=True)
+        (RESULTS / f"sweep_t_{tag}.json").write_text(json.dumps(rows, indent=2))
+        print(f"wrote {RESULTS / ('sweep_t_' + tag + '.json')}")
+        return
 
     history, it = [], iter(loader)
     for step in range(1, args.steps + 1):
