@@ -1919,3 +1919,60 @@ forcing visits and wrong at the states generation reaches. Teacher-forced fragme
 perplexity implies 80% per-fragment; generation delivers 33%. That is distribution
 shift, it is the one remaining hypothesis with enough headroom to close the gap,
 and the E8/E9 objectives are already built for it.
+
+---
+
+## R32 — The model copies its own errors: it was never trained to revise
+
+Two arms sharing every line of code, differing only in what sits in the *revealed*
+slots of the corrupted state -- the true fragments, or the model's own sampled picks.
+30 steps each, `e3b-xattn` weights, batch 64.
+
+| arm | frag loss, all slots | frag loss, masked slots | agreement with truth |
+| :--- | ---: | ---: | ---: |
+| `teacher` | 0.2104 -> 0.1724 | 1.2153 -> 1.0610 | 1.0000 |
+| `selfcond` | 2.1257 -> 1.2980 | 1.6547 -> 1.1597 | 0.7925 -> 0.8337 |
+
+**Masked prediction barely degrades.** With the model's own errors in context, the
+loss on masked slots is 36% higher at step 1 and about 9% higher by step 25. So the
+hypothesis as I stated it -- that the model predicts masked fragments badly at the
+states generation visits -- is mostly wrong. It predicts them nearly as well.
+
+**What it cannot do is revise.** On all slots the gap is 0.21 against 2.13, a factor
+of ten, and the difference is entirely the revealed slots. For `teacher` those hold
+the answer in the input and cost nothing; for `selfcond` they hold a wrong value
+against a true target and the model does not fix it. It copies its input.
+
+That is a training artefact with a clean mechanism. Every revealed slot the model has
+ever seen was correct, so "copy the revealed value" was an optimal strategy for 60
+epochs. At generation the same strategy makes the first wrong fragment permanent, and
+the errors accumulate along the Euler trajectory. 80% per-slot accuracy with no
+recovery compounds to roughly the 33% recall R31 measured.
+
+**It retro-explains two nulls that had no mechanism.** R27 found remasking noise
+irrelevant -- and remasking is precisely the opportunity to revise a committed value,
+which is worthless to a policy with no revision ability. R26 found cross-attention
+irrelevant -- more conditioning does not teach revision either. Both arms were
+adjusting things that could not matter while this was true.
+
+**And it is learnable quickly**: 2.1257 to 1.2980 in 25 steps at lr 1e-5.
+
+### Two measurements worth keeping separately
+
+`agreement` is the model's own per-slot accuracy against the truth, at the sampled
+corruption level: **0.79**. That is an independent route to the 80% the
+distribution-shift diagnosis has rested on since R23, arrived at by sampling the
+policy rather than by exponentiating a perplexity.
+
+`policy_entropy` returned nan on every previous call -- fragment logits are -inf
+outside the bag, and those terms are 0 * -inf rather than zero. Fixed and verified
+against ln 3 on a uniform row over three admissible candidates. It reads 1.20 for
+`teacher` and 1.22 for `selfcond`, which is the collapse baseline the RL arms will be
+measured against.
+
+### What this does not yet show
+
+Thirty steps is a smoke test. The claim that error correction closes the generation
+gap needs a real run and an eval, with `teacher` trained identically as the control --
+both arms take gradient steps, so any improvement in `selfcond` has to be measured
+against `teacher` rather than against `e3b-xattn`.

@@ -4,6 +4,42 @@ Append-only log. Newest entry at the top.
 
 ---
 
+## 2026-09-28 — The model copies its own errors; it was never trained to revise
+
+Self-conditioning instrumented and smoke-tested. Two arms, identical code, differing
+only in what sits in the revealed slots. RESULTS.md R32.
+
+Masked-slot prediction barely degrades with the model's own errors in context: 1.22
+against 1.65 at step 1, nearly equal by step 25. So the hypothesis as I stated it --
+bad masked prediction at generated states -- is mostly wrong.
+
+The gap is all in the revealed slots: 0.21 against 2.13 over all slots. The model
+does not fix a slot holding a wrong fragment, it copies its input. Every revealed
+slot in 60 epochs of training was correct, so copying was optimal; at generation it
+makes the first wrong fragment permanent and errors accumulate. 80% per-slot with no
+recovery compounds to about the 33% recall of R31.
+
+This retro-explains two nulls I had no mechanism for. R27's remasking noise is
+precisely the chance to revise a committed value, worthless without revision ability.
+R26's cross-attention does not teach revision either.
+
+Learnable fast: 2.13 to 1.30 in 25 steps at lr 1e-5.
+
+Two fixes on the way: `policy_entropy` had been returning nan on every call (-inf
+logits outside the bag give 0 * -inf), now verified against ln 3; and the arm
+comparison is measured on masked slots as well as all slots, because the all-slot
+number is dominated by revealed slots where teacher has the answer in its input.
+
+Also fixed today: apply_patches --force, after finding fragfm-tree-assembly had
+re-inserted its block six times because its marker never matched its own
+replacement, and the abs() denominator had never reached the checkout for the
+opposite reason.
+
+Next: real runs of both arms, then eval. Both arms train, so selfcond must be
+measured against teacher, not against e3b-xattn.
+
+---
+
 ## 2026-09-25 — Predicted count recovers 69% of the oracle gap; count lever spent
 
 `--n-frag predict` gives fragment recall 0.3344 against 0.2850 for the old sampled
