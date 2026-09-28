@@ -114,11 +114,15 @@ def main():
     from fragfm.model.ae import FragJunctionAE
     from fragfm.model.flow import CoarseGraphPropagate, FragToVect
     from fragfm.utils.file import read_yaml_as_easydict
+    from easydict import EasyDict as edict
 
     stem = Path(args.data).stem
     ck = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-    cfg = read_yaml_as_easydict(
-        {k: v for k, v in ck["cfg"].items() if k != "latent_transform_param"})
+    # read_yaml_as_easydict takes a path; the checkpoint's cfg is already a dict,
+    # so it goes through EasyDict directly -- the same type train_flow.py expects,
+    # since attribute access is how process_single_epoch reads every field.
+    cfg = edict({k: v for k, v in ck["cfg"].items()
+                 if k != "latent_transform_param"})
     cfg.latent_transform_param = ck["cfg"]["latent_transform_param"]
 
     ds = make_spectrum_dataset(args.data, f"data/processed/{stem}_fragment.lmdb",
