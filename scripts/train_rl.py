@@ -202,11 +202,11 @@ def main():
         # the trajectory's earliest and most consequential commitments are made in
         # exactly the region training visits least -- and R33 ruled out the other
         # structural difference, wrong values in the revealed slots.
-        print("     t  masked_frac  argmax_acc  frag_masked  entropy")
+        print("     t  masked_frac  argmax_acc  frag_masked  entropy  n_slots")
         rows = []
         for t in (0.05, 0.15, 0.25, 0.35, 0.5, 0.65, 0.8, 0.95):
             ag = fm = en = mf = 0.0
-            n = 0
+            n = slots = 0
             it2 = iter(loader)
             for _ in range(args.steps):
                 try:
@@ -230,12 +230,17 @@ def main():
                 fm += float(F.cross_entropy(o["h_logit"][m], o["h_type"][m]))
                 en += policy_entropy(o["h_logit"].detach(), m)
                 mf += float(o["crpt_h_mask"].float().mean())
+                slots += int(m.sum())
                 n += 1
             if n:
+                # n_slots is the number of masked decisions the accuracy is
+                # averaged over.  At t=0.95 barely anything is masked, so the row
+                # rests on a handful of decisions and must not be read as a trend.
                 rows.append({"t": t, "masked_frac": mf / n, "argmax_acc": ag / n,
-                             "frag_masked": fm / n, "entropy": en / n})
+                             "frag_masked": fm / n, "entropy": en / n,
+                             "n_slots": slots})
                 print(f"  {t:.2f}  {mf / n:11.3f}  {ag / n:10.4f}"
-                      f"  {fm / n:11.4f}  {en / n:7.3f}", flush=True)
+                      f"  {fm / n:11.4f}  {en / n:7.3f}  {slots:7d}", flush=True)
         (RESULTS / f"sweep_t_{tag}.json").write_text(json.dumps(rows, indent=2))
         print(f"wrote {RESULTS / ('sweep_t_' + tag + '.json')}")
         return
